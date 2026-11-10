@@ -1,0 +1,53 @@
+
+name: Medical RAG Cloud Ingestion
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - main
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 45
+
+    env:
+      QDRANT_URL: ${{ secrets.QDRANT_URL }}
+      QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+      COLLECTION_NAME: ${{ secrets.COLLECTION_NAME }}
+      HF_HOME: ${{ github.workspace }}/.cache/huggingface
+
+    steps:
+      - name: Checkout GitHub Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Cache Embedding Model
+        uses: actions/cache@v4
+        with:
+          path: .cache/huggingface
+          key: medical-model-v1
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Medical RAG Ingestion
+        run: |
+          python main.py
+
+      - name: Upload Generated PDF
+        uses: actions/upload-artifact@v4
+        with:
+          name: medical-disease-pdf
+          path: output/diseases_symptoms_medicines.pdf
+          retention-days: 30
