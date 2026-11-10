@@ -41,6 +41,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # NEW STEP: Validate 50 diseases
+      - name: Validate Disease Dataset
+        run: |
+          python -c "from src.disease_data import DISEASES; print('Disease count:', len(DISEASES)); assert len(DISEASES) == 50"
+
       - name: Run Medical RAG Ingestion
         run: |
           python main.py
