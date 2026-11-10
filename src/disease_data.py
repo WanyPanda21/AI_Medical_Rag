@@ -330,13 +330,6 @@ DISEASES = [
         "precautions": "Requires ophthalmology monitoring."
     },
     {
-        "name": "Cataract",
-        "category": "Eye",
-        "symptoms": ["Blurred vision", "Glare", "Poor night vision"],
-        "medicines": ["No established medicine reverses cataracts"],
-        "precautions": "Surgery is definitive when vision is significantly affected."
-    },
-    {
         "name": "Dengue",
         "category": "Infectious",
         "symptoms": ["High fever", "Severe body aches", "Rash", "Headache"],
