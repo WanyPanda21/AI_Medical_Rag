@@ -8,7 +8,7 @@ from src.embeddings import generate_embeddings
 # Configuration
 COLLECTION_NAME = os.getenv(
     "COLLECTION_NAME",
-    "AI_Medicine"
+    "ai_medicine_test"
 )
 
 QDRANT_URL = os.getenv("QDRANT_URL")

@@ -48,26 +48,6 @@ def ingest_pdf(pdf_path: str):
 
     embeddings = generate_embeddings(chunks)
 
-    # Step 4: Remove old chunks for this PDF
-    source = os.path.basename(pdf_path)
-
-    print("Deleting old vectors for this source...")
-
-    client.delete(
-        collection_name=collection_name,
-        points_selector=models.FilterSelector(
-            filter=models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="source",
-                        match=models.MatchValue(value=source)
-                    )
-                ]
-            )
-        ),
-        wait=True
-    )
-
     # Step 5: Prepare Qdrant points
     points = []
 
