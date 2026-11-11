@@ -1,0 +1,56 @@
+
+name: Medical RAG Cloud Retrieval
+
+on:
+  workflow_dispatch:
+
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  retrieval:
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 30
+
+    env:
+      QDRANT_URL: ${{ secrets.QDRANT_URL }}
+      QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+      COLLECTION_NAME: ${{ secrets.COLLECTION_NAME }}
+      HF_HOME: ${{ github.workspace }}/.cache/huggingface
+
+    steps:
+      # Step 1: Checkout Repository
+      - name: Checkout GitHub Repository
+        uses: actions/checkout@v4
+
+      # Step 2: Setup Python
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # Step 3: Cache Embedding Model
+      - name: Cache Embedding Model
+        uses: actions/cache@v4
+        with:
+          path: .cache/huggingface
+          key: medical-model-v1
+
+      # Step 4: Install Dependencies
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Step 5: Validate Environment Variables
+      - name: Validate Qdrant Configuration
+        run: |
+          python -c "import os; required=['QDRANT_URL','QDRANT_API_KEY','COLLECTION_NAME']; missing=[x for x in required if not os.getenv(x)]; assert not missing, f'Missing variables: {missing}'; print('Qdrant configuration validated')"
+
+      # Step 6: Run Retrieval Tests
+      - name: Run Medical RAG Retrieval
+        run: |
+          python test_retrieval.py
