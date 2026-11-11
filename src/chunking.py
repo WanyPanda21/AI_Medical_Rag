@@ -1,35 +1,36 @@
 
-import fitz
+from pypdf import PdfReader
 
 
-def extract_pdf_text(pdf_path):
+def extract_text_from_pdf(pdf_path: str) -> str:
+    """
+    Extract text from PDF file.
+    """
 
-    document = fitz.open(pdf_path)
+    reader = PdfReader(pdf_path)
 
-    pages = []
+    extracted_text = []
 
-    for page_number, page in enumerate(document):
+    for page_number, page in enumerate(reader.pages, start=1):
+        text = page.extract_text()
 
-        text = page.get_text("text")
+        if text:
+            extracted_text.append(text)
 
-        if text.strip():
-            pages.append({
-                "page": page_number + 1,
-                "text": text
-            })
-
-    document.close()
-
-    return pages
+    return "\n".join(extracted_text)
 
 
-def split_into_chunks(
-    text,
-    chunk_size=800,
-    overlap=150
-):
+def chunk_text(
+    text: str,
+    chunk_size: int = 500,
+    chunk_overlap: int = 100
+) -> list[str]:
+    """
+    Split text into chunks with overlap.
+    """
 
-    text = " ".join(text.split())
+    if chunk_overlap >= chunk_size:
+        raise ValueError("Chunk overlap must be smaller than chunk size")
 
     chunks = []
 
@@ -37,46 +38,13 @@ def split_into_chunks(
 
     while start < len(text):
 
-        end = min(start + chunk_size, len(text))
-
-        # Prefer ending at a word boundary.
-        if end < len(text):
-            boundary = text.rfind(" ", start, end)
-
-            if boundary > start:
-                end = boundary
+        end = start + chunk_size
 
         chunk = text[start:end].strip()
 
         if chunk:
             chunks.append(chunk)
 
-        if end >= len(text):
-            break
-
-        start = end - overlap
+        start += chunk_size - chunk_overlap
 
     return chunks
-
-
-def create_document_chunks(pdf_path):
-
-    pages = extract_pdf_text(pdf_path)
-
-    all_chunks = []
-
-    for page in pages:
-
-        chunks = split_into_chunks(page["text"])
-
-        for chunk_index, chunk in enumerate(chunks):
-
-            all_chunks.append({
-                "text": chunk,
-                "page": page["page"],
-                "chunk_index": chunk_index
-            })
-
-    print(f"Total chunks generated: {len(all_chunks)}")
-
-    return all_chunks

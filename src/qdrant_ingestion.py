@@ -3,164 +3,111 @@ import os
 import uuid
 
 from qdrant_client import QdrantClient, models
+
+from src.chunking import extract_text_from_pdf, chunk_text
 from src.embeddings import generate_embeddings
 
 
-# Configuration
-COLLECTION_NAME = os.getenv("COLLECTION_NAME", "AI_Medicine")
-VECTOR_SIZE = 384
-BATCH_SIZE = 64
+def ingest_pdf(pdf_path: str):
 
-QDRANT_URL = os.getenv("QDRANT_URL")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+    # Qdrant configuration from environment variables
+    qdrant_url = os.environ["QDRANT_URL"]
+    qdrant_api_key = os.environ["QDRANT_API_KEY"]
+    collection_name = os.environ["QDRANT_COLLECTION_NAME"]
 
-if not QDRANT_URL:
-    raise ValueError("QDRANT_URL is missing")
+    # Connect to Qdrant Cloud
+    client = QdrantClient(
+        url=qdrant_url,
+        api_key=qdrant_api_key
+    )
 
-if not QDRANT_API_KEY:
-    raise ValueError("QDRANT_API_KEY is missing")
+    # Step 1: Extract PDF text
+    print("Extracting text from PDF...")
 
+    text = extract_text_from_pdf(pdf_path)
 
-# Qdrant connection
-client = QdrantClient(
-    url=QDRANT_URL,
-    api_key=QDRANT_API_KEY,
-    timeout=120
-)
+    if not text.strip():
+        raise ValueError("No text extracted from PDF")
 
-print("Connected to Qdrant Cloud")
-print(f"Collection: {COLLECTION_NAME}")
+    # Step 2: Split text into chunks
+    print("Creating chunks...")
 
+    chunks = chunk_text(
+        text=text,
+        chunk_size=500,
+        chunk_overlap=100
+    )
 
-# Step 1: Create or validate collection
-def create_collection():
-
-    if not client.collection_exists(COLLECTION_NAME):
-
-        print("Creating Qdrant collection...")
-
-        client.create_collection(
-            collection_name=COLLECTION_NAME,
-            vectors_config=models.VectorParams(
-                size=VECTOR_SIZE,
-                distance=models.Distance.COSINE
-            )
-        )
-
-        print("Collection created successfully.")
-
-    else:
-
-        print("Collection already exists.")
-
-        info = client.get_collection(COLLECTION_NAME)
-        config = info.config.params.vectors
-
-        if isinstance(config, dict):
-            config = config.get("")
-
-        if config is None or config.size != VECTOR_SIZE:
-            raise ValueError(
-                "Qdrant collection must support "
-                f"{VECTOR_SIZE}-dimensional vectors."
-            )
-
-        if config.distance != models.Distance.COSINE:
-            raise ValueError(
-                "Qdrant collection must use COSINE distance."
-            )
-
-
-# Step 2: Ingest chunks
-def ingest_chunks(chunks):
+    print(f"Total chunks created: {len(chunks)}")
 
     if not chunks:
-        raise ValueError("No chunks available for ingestion.")
+        raise ValueError("No chunks created")
 
-    create_collection()
+    # Step 3: Generate embeddings
+    print("Generating embeddings...")
 
-    total_chunks = len(chunks)
+    embeddings = generate_embeddings(chunks)
 
-    print(f"Total chunks to upload: {total_chunks}")
+    # Step 4: Remove old chunks for this PDF
+    source = os.path.basename(pdf_path)
 
-    # Process in batches
-    for start in range(0, total_chunks, BATCH_SIZE):
+    print("Deleting old vectors for this source...")
 
-        batch = chunks[start:start + BATCH_SIZE]
+    client.delete(
+        collection_name=collection_name,
+        points_selector=models.FilterSelector(
+            filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="source",
+                        match=models.MatchValue(value=source)
+                    )
+                ]
+            )
+        ),
+        wait=True
+    )
 
-        texts = [
-            item["text"]
-            for item in batch
-        ]
+    # Step 5: Prepare Qdrant points
+    points = []
 
-        print(
-            f"Generating embeddings for batch "
-            f"{start // BATCH_SIZE + 1}"
+    for index, (chunk, embedding) in enumerate(
+        zip(chunks, embeddings)
+    ):
+
+        point_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"{source}_{index}"
+            )
         )
 
-        vectors = generate_embeddings(texts)
-
-        points = []
-
-        for index, item in enumerate(batch):
-
-            unique_text = (
-                f"{item['page']}:"
-                f"{item['chunk_index']}:"
-                f"{item['text']}"
-            )
-
-            point_id = str(
-                uuid.uuid5(
-                    uuid.NAMESPACE_URL,
-                    unique_text
-                )
-            )
-
-            payload = {
-                "text": item["text"],
-                "page": item["page"],
-                "chunk_index": item["chunk_index"],
-                "source": "diseases_symptoms_medicines.pdf",
-                "document_type": "medical_educational_reference"
+        point = models.PointStruct(
+            id=point_id,
+            vector=embedding,
+            payload={
+                "text": chunk,
+                "source": source,
+                "chunk_index": index
             }
-
-            points.append(
-                models.PointStruct(
-                    id=point_id,
-                    vector=vectors[index],
-                    payload=payload
-                )
-            )
-
-        client.upsert(
-            collection_name=COLLECTION_NAME,
-            points=points,
-            wait=True
         )
 
-        uploaded = min(start + len(batch), total_chunks)
+        points.append(point)
 
-        print(
-            f"Successfully uploaded "
-            f"{uploaded}/{total_chunks} chunks"
-        )
+    # Step 6: Upload vectors to Qdrant
+    print("Uploading vectors to Qdrant...")
 
-    # Step 3: Verify upload
-    collection_info = client.get_collection(
-        COLLECTION_NAME
+    client.upload_points(
+        collection_name=collection_name,
+        points=points,
+        batch_size=100,
+        wait=True
     )
 
-    print("\nQDRANT INGESTION COMPLETED")
+    print("RAG ingestion completed successfully!")
 
-    print(
-        "Total points in collection:",
-        collection_info.points_count
-    )
+    print(f"PDF: {source}")
+    print(f"Chunks uploaded: {len(points)}")
+    print(f"Collection: {collection_name}")
 
-    print(
-        "Collection status:",
-        collection_info.status
-    )
-
-    return collection_info.points_count
+    client.close()

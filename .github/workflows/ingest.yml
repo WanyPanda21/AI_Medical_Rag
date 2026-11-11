@@ -1,5 +1,5 @@
 
-name: Medical RAG Cloud Ingestion
+name: RAG PDF Ingestion
 
 on:
   workflow_dispatch:
@@ -7,52 +7,35 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "data/**"
+      - "src/**"
+      - "main.py"
+      - "requirements.txt"
+      - ".github/workflows/ingest.yml"
 
 jobs:
-  ingest:
+  ingestion:
     runs-on: ubuntu-latest
 
-    timeout-minutes: 45
-
-    env:
-      QDRANT_URL: ${{ secrets.QDRANT_URL }}
-      QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-      COLLECTION_NAME: ${{ secrets.COLLECTION_NAME }}
-      HF_HOME: ${{ github.workspace }}/.cache/huggingface
-
     steps:
-      - name: Checkout GitHub Repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
-
-      - name: Cache Embedding Model
-        uses: actions/cache@v4
-        with:
-          path: .cache/huggingface
-          key: medical-model-v1
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # NEW STEP: Validate 50 diseases
-      - name: Validate Disease Dataset
-        run: |
-          python -c "from src.disease_data import DISEASES; print('Disease count:', len(DISEASES)); assert len(DISEASES) == 50"
-
-      - name: Run Medical RAG Ingestion
+      - name: Run RAG Ingestion
+        env:
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          QDRANT_COLLECTION_NAME: ${{ secrets.COLLECTION_NAME }}
         run: |
           python main.py
-
-      - name: Upload Generated PDF
-        uses: actions/upload-artifact@v4
-        with:
-          name: medical-disease-pdf
-          path: output/diseases_symptoms_medicines.pdf
-          retention-days: 30
