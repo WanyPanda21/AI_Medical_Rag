@@ -12,6 +12,7 @@ def extract_text_from_pdf(pdf_path: str) -> str:
     extracted_text = []
 
     for page_number, page in enumerate(reader.pages, start=1):
+
         text = page.extract_text()
 
         if text:
@@ -29,8 +30,13 @@ def chunk_text(
     Split text into chunks with overlap.
     """
 
-    if chunk_overlap >= chunk_size:
-        raise ValueError("Chunk overlap must be smaller than chunk size")
+    if chunk_size <= 0:
+        raise ValueError("Chunk size must be positive")
+
+    if chunk_overlap < 0 or chunk_overlap >= chunk_size:
+        raise ValueError(
+            "Chunk overlap must be non-negative and smaller than chunk size"
+        )
 
     chunks = []
 

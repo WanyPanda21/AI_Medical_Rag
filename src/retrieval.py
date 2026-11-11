@@ -6,8 +6,9 @@ from src.embeddings import generate_embeddings
 
 
 # Configuration
+
 COLLECTION_NAME = os.getenv(
-    "COLLECTION_NAME",
+    "QDRANT_COLLECTION_NAME",
     "ai_medicine_test"
 )
 
@@ -23,6 +24,7 @@ if not QDRANT_API_KEY:
 
 
 # Connect to Qdrant Cloud
+
 client = QdrantClient(
     url=QDRANT_URL,
     api_key=QDRANT_API_KEY,
@@ -33,17 +35,18 @@ client = QdrantClient(
 print("Connected to Qdrant Cloud")
 
 
-def retrieve_documents(
-    query,
-    top_k=5
-):
+def retrieve_documents(query: str, top_k: int = 5):
 
     if not query or not query.strip():
         raise ValueError("Query cannot be empty")
 
+    if top_k <= 0:
+        raise ValueError("top_k must be positive")
+
     print("\nUser Query:", query)
 
     # Step 1: Generate query embedding
+
     print("\nGenerating query embedding...")
 
     query_vector = generate_embeddings([query])[0]
@@ -55,6 +58,7 @@ def retrieve_documents(
     )
 
     # Step 2: Search Qdrant
+
     print("\nSearching Qdrant...")
 
     search_results = client.query_points(
@@ -65,6 +69,7 @@ def retrieve_documents(
     ).points
 
     # Step 3: Extract retrieved information
+
     retrieved_documents = []
 
     for result in search_results:
@@ -72,17 +77,11 @@ def retrieve_documents(
         payload = result.payload or {}
 
         retrieved_documents.append({
-
             "text": payload.get("text", ""),
-
             "page": payload.get("page"),
-
             "chunk_index": payload.get("chunk_index"),
-
             "source": payload.get("source"),
-
             "score": result.score
-
         })
 
     print(
