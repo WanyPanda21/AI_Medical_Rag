@@ -64,4 +64,4 @@ jobs:
               QdrantApiKey="${{ secrets.QDRANT_API_KEY }}" \
               QdrantCollectionName="${{ secrets.COLLECTION_NAME }}" \
               AnthropicApiKey="${{ secrets.ANTHROPIC_API_KEY }}" \
-              ClaudeModel="${{ secrets.CLAUDE_MODEL }}"
+              ClaudeModel="${{ vars.CLAUDE_MODEL }}"
