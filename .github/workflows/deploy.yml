@@ -107,48 +107,37 @@ jobs:
             --password-stdin $REPOSITORY_URI
 
       # Generate Dockerfile during workflow
+      
       - name: Create Lambda Dockerfile
         run: |
-
           cat > Dockerfile <<'EOF'
           FROM public.ecr.aws/lambda/python:3.11
 
           WORKDIR ${LAMBDA_TASK_ROOT}
 
-          COPY requirements.txt .
+          RUN python -m pip install --upgrade pip setuptools wheel
 
-          RUN pip install --no-cache-dir \
-              --target ${LAMBDA_TASK_ROOT} \
-              anthropic \
-              qdrant-client \
-              pypdf \
-              && pip install --no-cache-dir \
-              --target ${LAMBDA_TASK_ROOT} \
-              --no-deps \
-              sentence-transformers
-
+          # Install CPU-only PyTorch first
           RUN pip install --no-cache-dir \
               --target ${LAMBDA_TASK_ROOT} \
               --index-url https://download.pytorch.org/whl/cpu \
               torch
 
+          # Install the existing RAG dependencies
           RUN pip install --no-cache-dir \
               --target ${LAMBDA_TASK_ROOT} \
-              --no-deps \
-              transformers \
-              tokenizers \
-              huggingface-hub \
-              safetensors \
-              scikit-learn \
-              scipy \
-              numpy \
-              Pillow
+              --extra-index-url https://download.pytorch.org/whl/cpu \
+              sentence-transformers \
+              anthropic \
+              qdrant-client \
+              pypdf
 
           COPY src/ ${LAMBDA_TASK_ROOT}/src/
           COPY lambda_function.py ${LAMBDA_TASK_ROOT}/
 
           CMD ["lambda_function.lambda_handler"]
           EOF
+
 
       # Build container image
       - name: Build Lambda Image
