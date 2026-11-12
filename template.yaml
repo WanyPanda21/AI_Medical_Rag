@@ -24,7 +24,7 @@ Parameters:
 
   ClaudeModel:
     Type: String
-    Default: claude-Haiku-5
+    Default: claude-haiku-5-5
 
 
 Resources:
