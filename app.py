@@ -1,86 +1,85 @@
 
-import os
-import requests
 import streamlit as st
-
-API_URL = os.getenv("RAG_API_URL", "")
+import requests
+import os
 
 st.set_page_config(
-    page_title="Medical AI Assistant",
-    page_icon="🩺",
+    page_title="Medical RAG Assistant",
+    page_icon="🏥",
     layout="centered"
 )
 
-st.title("🩺 Medical AI Assistant")
-st.caption("Ask questions about medicines, diseases and symptoms.")
+# API Gateway endpoint
+API_URL = st.secrets.get(
+    "API_URL",
+    os.getenv("API_URL", "")
+)
 
-if not API_URL:
-    st.error("RAG_API_URL is not configured.")
-    st.stop()
+st.title("🏥 Medical RAG Assistant")
+st.write("Ask questions based on your medical PDF documents.")
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+st.divider()
 
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+query = st.text_area(
+    "Enter your medical question",
+    placeholder="Example: What are the symptoms of diabetes?",
+    height=120
+)
 
-        if msg.get("sources"):
-            with st.expander("Retrieved Sources"):
-                for source in msg["sources"]:
-                    st.write(f"PDF: {source.get('source')}")
-                    st.write(f"Chunk: {source.get('chunk_index')}")
-                    st.write(f"Score: {source.get('score')}")
+if st.button("🚀 Hit", type="primary", use_container_width=True):
 
-question = st.chat_input("Ask your medical question...")
+    if not query.strip():
+        st.warning("Please enter a question.")
 
-if question:
-    st.session_state.messages.append({
-        "role": "user",
-        "content": question
-    })
+    elif not API_URL:
+        st.error("API URL is not configured.")
 
-    with st.chat_message("user"):
-        st.markdown(question)
+    else:
+        try:
+            with st.spinner("Searching medical documents and generating answer..."):
 
-    with st.chat_message("assistant"):
-        with st.spinner("Searching medical documents..."):
-            try:
                 response = requests.post(
                     API_URL,
-                    json={"question": question},
+                    json={"query": query.strip()},
                     timeout=35
                 )
 
-                response.raise_for_status()
-                data = response.json()
+                if response.status_code == 200:
 
-                if not data.get("success"):
-                    raise Exception(data.get("error", "Request failed"))
+                    result = response.json()
 
-                answer = data["answer"]
-                sources = data.get("sources", [])
+                    st.success("Answer generated successfully!")
 
-                st.markdown(answer)
+                    st.subheader("Answer")
+                    st.markdown(result.get("answer", "No answer returned."))
 
-                if sources:
-                    with st.expander("Retrieved Sources"):
+                    st.divider()
+
+                    st.subheader("Sources")
+
+                    sources = result.get("sources", [])
+
+                    if sources:
                         for source in sources:
-                            st.write(f"PDF: {source.get('source')}")
-                            st.write(f"Chunk: {source.get('chunk_index')}")
-                            st.write(f"Score: {source.get('score')}")
+                            with st.expander(
+                                f"{source['source']} - Chunk {source['chunk_index']}"
+                            ):
+                                st.write("Source:", source["source"])
+                                st.write("Chunk:", source["chunk_index"])
+                                st.write("Score:", source["score"])
+                    else:
+                        st.info("No sources available.")
 
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": answer,
-                    "sources": sources
-                })
+                else:
+                    st.error(
+                        f"API Error ({response.status_code}): "
+                        f"{response.text}"
+                    )
 
-            except requests.exceptions.Timeout:
-                st.error("Request timed out.")
+        except requests.exceptions.Timeout:
+            st.error(
+                "The request timed out. The backend may need more time."
+            )
 
-            except requests.exceptions.RequestException as e:
-                st.error(f"Backend connection failed: {e}")
-
-            except Exception as e:
-                st.error(f"Error: {e}")
+        except requests.exceptions.RequestException as e:
+            st.error(f"Connection error: {str(e)}")

@@ -40,7 +40,22 @@ jobs:
           echo "ROLE_NAME=medical-rag-lambda-role" >> $GITHUB_ENV
           echo "REPOSITORY=medical-rag-backend" >> $GITHUB_ENV
 
-      # Create Lambda execution role automatically
+      # Create Lambda environment variables
+      - name: Create Lambda Environment Variables
+        run: |
+          cat > lambda-env.json <<EOF
+          {
+            "Variables": {
+              "QDRANT_URL": "${{ secrets.QDRANT_URL }}",
+              "QDRANT_API_KEY": "${{ secrets.QDRANT_API_KEY }}",
+              "QDRANT_COLLECTION_NAME": "${{ secrets.COLLECTION_NAME }}",
+              "ANTHROPIC_API_KEY": "${{ secrets.ANTHROPIC_API_KEY }}",
+              "CLAUDE_MODEL": "claude-sonnet-4-6"
+            }
+          }
+          EOF
+
+      # Create Lambda execution role
       - name: Create Lambda Execution Role
         run: |
 
@@ -106,9 +121,7 @@ jobs:
             --username AWS \
             --password-stdin $REPOSITORY_URI
 
-      # Generate Dockerfile during workflow
-      
-      
+      # Create Dockerfile
       - name: Create Lambda Dockerfile
         run: |
           cat > Dockerfile <<'EOF'
@@ -118,20 +131,17 @@ jobs:
 
           RUN python -m pip install --upgrade pip setuptools wheel
 
-          # Install compatible NumPy binary wheel
           RUN pip install --no-cache-dir \
               --only-binary=:all: \
               --target ${LAMBDA_TASK_ROOT} \
               "numpy==1.26.4"
 
-          # Install CPU-only PyTorch
           RUN pip install --no-cache-dir \
               --only-binary=:all: \
               --target ${LAMBDA_TASK_ROOT} \
               --index-url https://download.pytorch.org/whl/cpu \
               torch
 
-          # Install remaining RAG dependencies
           RUN pip install --no-cache-dir \
               --only-binary=:all: \
               --target ${LAMBDA_TASK_ROOT} \
@@ -141,23 +151,32 @@ jobs:
               qdrant-client \
               pypdf
 
-          # Install Sentence Transformers dependencies
           RUN pip install --no-cache-dir \
               --only-binary=:all: \
               --target ${LAMBDA_TASK_ROOT} \
-              "transformers" \
-              "tokenizers" \
-              "huggingface-hub" \
-              "safetensors" \
-              "scikit-learn" \
-              "scipy" \
-              "Pillow"
+              transformers \
+              tokenizers \
+              huggingface-hub \
+              safetensors \
+              scikit-learn \
+              scipy \
+              Pillow
 
           COPY src/ ${LAMBDA_TASK_ROOT}/src/
           COPY lambda_function.py ${LAMBDA_TASK_ROOT}/
 
           CMD ["lambda_function.lambda_handler"]
           EOF
+
+      # Build and push Docker image
+      - name: Build and Push Docker Image
+        run: |
+
+          docker build --platform linux/amd64 -t $REPOSITORY:latest .
+
+          docker tag $REPOSITORY:latest $REPOSITORY_URI:latest
+
+          docker push $REPOSITORY_URI:latest
 
       # Create or update Lambda
       - name: Create or Update Lambda
@@ -212,7 +231,7 @@ jobs:
             cat > cors.json <<'EOF'
           {
             "AllowOrigins": ["http://localhost:8501"],
-            "AllowMethods": ["POST"],
+            "AllowMethods": ["POST", "OPTIONS"],
             "AllowHeaders": ["content-type"]
           }
           EOF
@@ -293,7 +312,7 @@ jobs:
             --source-arn "arn:aws:execute-api:$REGION:$ACCOUNT_ID:$API_ID/*/POST/ask" \
             || echo "Permission already exists."
 
-      # Display endpoint
+      # Display API endpoint
       - name: Display API URL
         run: |
 
