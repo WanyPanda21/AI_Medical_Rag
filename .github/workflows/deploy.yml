@@ -197,7 +197,7 @@ jobs:
             aws lambda update-function-configuration \
               --function-name $FUNCTION_NAME \
               --timeout 29 \
-              --memory-size 3008 \
+              --memory-size 2048 \
               --environment file://lambda-env.json
 
           else
@@ -210,7 +210,7 @@ jobs:
               --code ImageUri=$REPOSITORY_URI:latest \
               --role $ROLE_ARN \
               --timeout 29 \
-              --memory-size 4096 \
+              --memory-size 2048 \
               --environment file://lambda-env.json
 
           fi
