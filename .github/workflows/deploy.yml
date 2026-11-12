@@ -22,12 +22,6 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      # Authenticate using your GitHub access key and secret key
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -38,15 +32,18 @@ jobs:
       - name: Set AWS Variables
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          REGION="${{ secrets.AWS_REGION }}"
 
           echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
+          echo "REGION=$REGION" >> $GITHUB_ENV
           echo "FUNCTION_NAME=medical-rag-backend" >> $GITHUB_ENV
           echo "ROLE_NAME=medical-rag-lambda-role" >> $GITHUB_ENV
-          echo "BUCKET=medical-rag-lambda-${{ secrets.AWS_REGION }}-$ACCOUNT_ID" >> $GITHUB_ENV
+          echo "REPOSITORY=medical-rag-backend" >> $GITHUB_ENV
 
-      # Automatically create Lambda execution role
+      # Create Lambda execution role automatically
       - name: Create Lambda Execution Role
         run: |
+
           cat > trust-policy.json <<'EOF'
           {
             "Version": "2012-10-17",
@@ -61,9 +58,11 @@ jobs:
           EOF
 
           if ! aws iam get-role --role-name $ROLE_NAME >/dev/null 2>&1; then
+
             aws iam create-role \
               --role-name $ROLE_NAME \
               --assume-role-policy-document file://trust-policy.json
+
           fi
 
           aws iam attach-role-policy \
@@ -79,62 +78,105 @@ jobs:
 
           sleep 15
 
-      # Package existing retrieval and generation code only
-      - name: Install Dependencies
+      # Create ECR repository
+      - name: Create ECR Repository
         run: |
-          mkdir package
 
-          python -m pip install --upgrade pip
+          if ! aws ecr describe-repositories \
+            --repository-names $REPOSITORY >/dev/null 2>&1; then
 
-          pip install \
-            --target package \
-            -r requirements.txt
+            aws ecr create-repository \
+              --repository-name $REPOSITORY
 
-          cp lambda_function.py package/
-          cp -r src package/
-
-      - name: Check Package Size
-        run: |
-          SIZE=$(du -sm package | cut -f1)
-
-          echo "Package size: ${SIZE} MB"
-
-          if [ "$SIZE" -gt 240 ]; then
-            echo "ERROR: Package exceeds safe Lambda ZIP size."
-            exit 1
           fi
 
-      - name: Create Deployment ZIP
-        run: |
-          cd package
-          zip -qr ../deployment.zip .
-          cd ..
+          REPOSITORY_URI=$(aws ecr describe-repositories \
+            --repository-names $REPOSITORY \
+            --query 'repositories[0].repositoryUri' \
+            --output text)
 
-      - name: Create S3 Bucket
-        run: |
-          if ! aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
-            if [ "${{ secrets.AWS_REGION }}" = "us-east-1" ]; then
-              aws s3api create-bucket --bucket "$BUCKET"
-            else
-              aws s3api create-bucket \
-                --bucket "$BUCKET" \
-                --create-bucket-configuration \
-                LocationConstraint=${{ secrets.AWS_REGION }}
-            fi
-          fi
+          echo "REPOSITORY_URI=$REPOSITORY_URI" >> $GITHUB_ENV
 
-      - name: Upload Deployment Package
+      # Login to ECR
+      - name: Login to Amazon ECR
         run: |
-          aws s3 cp deployment.zip s3://$BUCKET/deployment.zip
 
-      # Use your exact COLLECTION_NAME GitHub secret
-      - name: Prepare Lambda Environment
+          aws ecr get-login-password --region $REGION | \
+            docker login \
+            --username AWS \
+            --password-stdin $REPOSITORY_URI
+
+      # Generate Dockerfile during workflow
+      - name: Create Lambda Dockerfile
+        run: |
+
+          cat > Dockerfile <<'EOF'
+          FROM public.ecr.aws/lambda/python:3.11
+
+          WORKDIR ${LAMBDA_TASK_ROOT}
+
+          COPY requirements.txt .
+
+          RUN pip install --no-cache-dir \
+              --target ${LAMBDA_TASK_ROOT} \
+              anthropic \
+              qdrant-client \
+              pypdf \
+              && pip install --no-cache-dir \
+              --target ${LAMBDA_TASK_ROOT} \
+              --no-deps \
+              sentence-transformers
+
+          RUN pip install --no-cache-dir \
+              --target ${LAMBDA_TASK_ROOT} \
+              --index-url https://download.pytorch.org/whl/cpu \
+              torch
+
+          RUN pip install --no-cache-dir \
+              --target ${LAMBDA_TASK_ROOT} \
+              --no-deps \
+              transformers \
+              tokenizers \
+              huggingface-hub \
+              safetensors \
+              scikit-learn \
+              scipy \
+              numpy \
+              Pillow
+
+          COPY src/ ${LAMBDA_TASK_ROOT}/src/
+          COPY lambda_function.py ${LAMBDA_TASK_ROOT}/
+
+          CMD ["lambda_function.lambda_handler"]
+          EOF
+
+      # Build container image
+      - name: Build Lambda Image
+        run: |
+
+          docker build \
+            --platform linux/amd64 \
+            -t medical-rag-backend:latest .
+
+      # Push image to ECR
+      - name: Push Image to ECR
+        run: |
+
+          docker tag medical-rag-backend:latest \
+            $REPOSITORY_URI:latest
+
+          docker push $REPOSITORY_URI:latest
+
+      # Configure Lambda environment
+      - name: Prepare Environment Variables
         env:
           QDRANT_URL: ${{ secrets.QDRANT_URL }}
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
           QDRANT_COLLECTION_NAME: ${{ secrets.COLLECTION_NAME }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
         run: |
+
           python - <<'PY'
           import os
           import json
@@ -148,8 +190,8 @@ jobs:
 
           config = {
               "Variables": {
-                  key: os.environ[key]
-                  for key in names
+                  name: os.environ[name]
+                  for name in names
               }
           }
 
@@ -157,35 +199,37 @@ jobs:
               json.dump(config, f)
           PY
 
+      # Create or update Lambda
       - name: Create or Update Lambda
         run: |
+
           if aws lambda get-function \
             --function-name $FUNCTION_NAME >/dev/null 2>&1; then
 
+            echo "Updating Lambda container image..."
+
             aws lambda update-function-code \
               --function-name $FUNCTION_NAME \
-              --s3-bucket $BUCKET \
-              --s3-key deployment.zip
+              --image-uri $REPOSITORY_URI:latest
 
             aws lambda wait function-updated-v2 \
               --function-name $FUNCTION_NAME
 
             aws lambda update-function-configuration \
               --function-name $FUNCTION_NAME \
-              --runtime python3.11 \
-              --handler lambda_function.lambda_handler \
               --timeout 29 \
               --memory-size 4096 \
               --environment file://lambda-env.json
 
           else
 
+            echo "Creating Lambda function..."
+
             aws lambda create-function \
               --function-name $FUNCTION_NAME \
-              --runtime python3.11 \
-              --handler lambda_function.lambda_handler \
+              --package-type Image \
+              --code ImageUri=$REPOSITORY_URI:latest \
               --role $ROLE_ARN \
-              --code S3Bucket=$BUCKET,S3Key=deployment.zip \
               --timeout 29 \
               --memory-size 4096 \
               --environment file://lambda-env.json
@@ -195,8 +239,10 @@ jobs:
           aws lambda wait function-active-v2 \
             --function-name $FUNCTION_NAME
 
+      # Create API Gateway
       - name: Create API Gateway
         run: |
+
           API_ID=$(aws apigatewayv2 get-apis \
             --query "Items[?Name=='medical-rag-api'].ApiId | [0]" \
             --output text)
@@ -222,8 +268,10 @@ jobs:
 
           echo "API_ID=$API_ID" >> $GITHUB_ENV
 
+      # Connect API Gateway with Lambda
       - name: Configure API Integration
         run: |
+
           LAMBDA_ARN=$(aws lambda get-function \
             --function-name $FUNCTION_NAME \
             --query Configuration.FunctionArn \
@@ -253,15 +301,19 @@ jobs:
             --output text)
 
           if [ "$ROUTE_ID" = "None" ] || [ -z "$ROUTE_ID" ]; then
+
             aws apigatewayv2 create-route \
               --api-id $API_ID \
               --route-key "POST /ask" \
               --target "integrations/$INTEGRATION_ID"
+
           else
+
             aws apigatewayv2 update-route \
               --api-id $API_ID \
               --route-id $ROUTE_ID \
               --target "integrations/$INTEGRATION_ID"
+
           fi
 
           aws apigatewayv2 create-stage \
@@ -269,22 +321,26 @@ jobs:
             --stage-name '$default' \
             --auto-deploy 2>/dev/null || true
 
-      - name: Allow API Gateway to Invoke Lambda
+      # Allow API Gateway to invoke Lambda
+      - name: Allow API Gateway Invocation
         run: |
+
           aws lambda add-permission \
             --function-name $FUNCTION_NAME \
             --statement-id apigateway-invoke \
             --action lambda:InvokeFunction \
             --principal apigateway.amazonaws.com \
-            --source-arn "arn:aws:execute-api:${{ secrets.AWS_REGION }}:$ACCOUNT_ID:$API_ID/*/POST/ask" \
+            --source-arn "arn:aws:execute-api:$REGION:$ACCOUNT_ID:$API_ID/*/POST/ask" \
             || echo "Permission already exists."
 
+      # Display endpoint
       - name: Display API URL
         run: |
+
           API_URL=$(aws apigatewayv2 get-api \
             --api-id $API_ID \
             --query ApiEndpoint \
             --output text)
 
-          echo "### Deployment Completed" >> $GITHUB_STEP_SUMMARY
+          echo "## Medical RAG Deployment" >> $GITHUB_STEP_SUMMARY
           echo "API URL: ${API_URL}/ask" >> $GITHUB_STEP_SUMMARY
