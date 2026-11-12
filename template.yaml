@@ -1,0 +1,180 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: Medical RAG Application with Qdrant Claude and Doctor HITL
+
+Parameters:
+
+  QdrantUrl:
+    Type: String
+    NoEcho: true
+
+  QdrantApiKey:
+    Type: String
+    NoEcho: true
+
+  QdrantCollectionName:
+    Type: String
+    Default: ai_medicine_test
+
+  AnthropicApiKey:
+    Type: String
+    NoEcho: true
+
+  ClaudeModel:
+    Type: String
+    Default: claude-Haiku-5
+
+
+Resources:
+
+  # -----------------------------------
+  # DYNAMODB TABLE
+  # -----------------------------------
+
+  MedicalRequestsTable:
+    Type: AWS::DynamoDB::Table
+
+    Properties:
+      TableName: MedicalRequests
+
+      BillingMode: PAY_PER_REQUEST
+
+      AttributeDefinitions:
+        - AttributeName: request_id
+          AttributeType: S
+
+      KeySchema:
+        - AttributeName: request_id
+          KeyType: HASH
+
+
+  # -----------------------------------
+  # API GATEWAY HTTP API
+  # -----------------------------------
+
+  MedicalApi:
+    Type: AWS::Serverless::HttpApi
+
+    Properties:
+      StageName: prod
+
+      CorsConfiguration:
+
+        AllowOrigins:
+          - http://localhost:8501
+
+        AllowHeaders:
+          - Content-Type
+
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+
+        MaxAge: 600
+
+
+  # -----------------------------------
+  # LAMBDA FUNCTION
+  # -----------------------------------
+
+  MedicalRagLambda:
+    Type: AWS::Serverless::Function
+
+    Properties:
+
+      FunctionName: medical_rag_backend
+
+      CodeUri: .
+
+      Handler: lambda_function.lambda_handler
+
+      Runtime: python3.13
+
+      Timeout: 28
+
+      MemorySize: 2048
+
+      Environment:
+
+        Variables:
+
+          MEDICAL_REQUESTS_TABLE:
+            !Ref MedicalRequestsTable
+
+          QDRANT_URL:
+            !Ref QdrantUrl
+
+          QDRANT_API_KEY:
+            !Ref QdrantApiKey
+
+          QDRANT_COLLECTION_NAME:
+            !Ref QdrantCollectionName
+
+          ANTHROPIC_API_KEY:
+            !Ref AnthropicApiKey
+
+          CLAUDE_MODEL:
+            !Ref ClaudeModel
+
+      Policies:
+
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MedicalRequestsTable
+
+
+      Events:
+
+        PatientQuery:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref MedicalApi
+            Path: /patient/query
+            Method: POST
+
+        PatientStatus:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref MedicalApi
+            Path: /patient/status/{request_id}
+            Method: GET
+
+        DoctorPending:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref MedicalApi
+            Path: /doctor/pending
+            Method: GET
+
+        DoctorReview:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref MedicalApi
+            Path: /doctor/review/{request_id}
+            Method: POST
+
+        PatientResponse:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref MedicalApi
+            Path: /patient/response/{request_id}
+            Method: GET
+
+
+Outputs:
+
+  MedicalApiUrl:
+    Description: Medical API Gateway URL
+    Value: !Sub
+      - "https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com/prod"
+      - ApiId: !Ref MedicalApi
+
+  MedicalLambdaFunction:
+    Description: Medical Lambda Function
+    Value: !Ref MedicalRagLambda
+
+  MedicalDynamoDBTable:
+    Description: Medical Requests DynamoDB Table
+    Value: !Ref MedicalRequestsTable
