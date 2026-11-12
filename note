@@ -1,14 +1,1 @@
-1. What does SentenceTransformer do?
-
-Converts text into numerical vectors. 
-Correct
-
-2. What is stored in a Qdrant point?
-
-A unique ID, vector and payload. 
-Correct
-
-3. Why do we store the original text in the payload?
-
-So we can read the retrieved medical information. 
-Correct
+Ingest.yml : Ta
