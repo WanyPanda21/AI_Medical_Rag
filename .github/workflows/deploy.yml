@@ -1,0 +1,290 @@
+
+name: Deploy Medical RAG Backend
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - main
+    paths:
+      - "lambda_function.py"
+      - "src/**"
+      - "requirements.txt"
+      - ".github/workflows/deploy.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Authenticate using your GitHub access key and secret key
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Set AWS Variables
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+          echo "ACCOUNT_ID=$ACCOUNT_ID" >> $GITHUB_ENV
+          echo "FUNCTION_NAME=medical-rag-backend" >> $GITHUB_ENV
+          echo "ROLE_NAME=medical-rag-lambda-role" >> $GITHUB_ENV
+          echo "BUCKET=medical-rag-lambda-${{ secrets.AWS_REGION }}-$ACCOUNT_ID" >> $GITHUB_ENV
+
+      # Automatically create Lambda execution role
+      - name: Create Lambda Execution Role
+        run: |
+          cat > trust-policy.json <<'EOF'
+          {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }]
+          }
+          EOF
+
+          if ! aws iam get-role --role-name $ROLE_NAME >/dev/null 2>&1; then
+            aws iam create-role \
+              --role-name $ROLE_NAME \
+              --assume-role-policy-document file://trust-policy.json
+          fi
+
+          aws iam attach-role-policy \
+            --role-name $ROLE_NAME \
+            --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+          ROLE_ARN=$(aws iam get-role \
+            --role-name $ROLE_NAME \
+            --query Role.Arn \
+            --output text)
+
+          echo "ROLE_ARN=$ROLE_ARN" >> $GITHUB_ENV
+
+          sleep 15
+
+      # Package existing retrieval and generation code only
+      - name: Install Dependencies
+        run: |
+          mkdir package
+
+          python -m pip install --upgrade pip
+
+          pip install \
+            --target package \
+            -r requirements.txt
+
+          cp lambda_function.py package/
+          cp -r src package/
+
+      - name: Check Package Size
+        run: |
+          SIZE=$(du -sm package | cut -f1)
+
+          echo "Package size: ${SIZE} MB"
+
+          if [ "$SIZE" -gt 240 ]; then
+            echo "ERROR: Package exceeds safe Lambda ZIP size."
+            exit 1
+          fi
+
+      - name: Create Deployment ZIP
+        run: |
+          cd package
+          zip -qr ../deployment.zip .
+          cd ..
+
+      - name: Create S3 Bucket
+        run: |
+          if ! aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+            if [ "${{ secrets.AWS_REGION }}" = "us-east-1" ]; then
+              aws s3api create-bucket --bucket "$BUCKET"
+            else
+              aws s3api create-bucket \
+                --bucket "$BUCKET" \
+                --create-bucket-configuration \
+                LocationConstraint=${{ secrets.AWS_REGION }}
+            fi
+          fi
+
+      - name: Upload Deployment Package
+        run: |
+          aws s3 cp deployment.zip s3://$BUCKET/deployment.zip
+
+      # Use your exact COLLECTION_NAME GitHub secret
+      - name: Prepare Lambda Environment
+        env:
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          QDRANT_COLLECTION_NAME: ${{ secrets.COLLECTION_NAME }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          import json
+
+          names = [
+              "QDRANT_URL",
+              "QDRANT_API_KEY",
+              "QDRANT_COLLECTION_NAME",
+              "ANTHROPIC_API_KEY"
+          ]
+
+          config = {
+              "Variables": {
+                  key: os.environ[key]
+                  for key in names
+              }
+          }
+
+          with open("lambda-env.json", "w") as f:
+              json.dump(config, f)
+          PY
+
+      - name: Create or Update Lambda
+        run: |
+          if aws lambda get-function \
+            --function-name $FUNCTION_NAME >/dev/null 2>&1; then
+
+            aws lambda update-function-code \
+              --function-name $FUNCTION_NAME \
+              --s3-bucket $BUCKET \
+              --s3-key deployment.zip
+
+            aws lambda wait function-updated-v2 \
+              --function-name $FUNCTION_NAME
+
+            aws lambda update-function-configuration \
+              --function-name $FUNCTION_NAME \
+              --runtime python3.11 \
+              --handler lambda_function.lambda_handler \
+              --timeout 29 \
+              --memory-size 4096 \
+              --environment file://lambda-env.json
+
+          else
+
+            aws lambda create-function \
+              --function-name $FUNCTION_NAME \
+              --runtime python3.11 \
+              --handler lambda_function.lambda_handler \
+              --role $ROLE_ARN \
+              --code S3Bucket=$BUCKET,S3Key=deployment.zip \
+              --timeout 29 \
+              --memory-size 4096 \
+              --environment file://lambda-env.json
+
+          fi
+
+          aws lambda wait function-active-v2 \
+            --function-name $FUNCTION_NAME
+
+      - name: Create API Gateway
+        run: |
+          API_ID=$(aws apigatewayv2 get-apis \
+            --query "Items[?Name=='medical-rag-api'].ApiId | [0]" \
+            --output text)
+
+          if [ "$API_ID" = "None" ] || [ -z "$API_ID" ]; then
+
+            cat > cors.json <<'EOF'
+          {
+            "AllowOrigins": ["http://localhost:8501"],
+            "AllowMethods": ["POST"],
+            "AllowHeaders": ["content-type"]
+          }
+          EOF
+
+            API_ID=$(aws apigatewayv2 create-api \
+              --name medical-rag-api \
+              --protocol-type HTTP \
+              --cors-configuration file://cors.json \
+              --query ApiId \
+              --output text)
+
+          fi
+
+          echo "API_ID=$API_ID" >> $GITHUB_ENV
+
+      - name: Configure API Integration
+        run: |
+          LAMBDA_ARN=$(aws lambda get-function \
+            --function-name $FUNCTION_NAME \
+            --query Configuration.FunctionArn \
+            --output text)
+
+          INTEGRATION_ID=$(aws apigatewayv2 get-integrations \
+            --api-id $API_ID \
+            --query "Items[?IntegrationUri=='$LAMBDA_ARN'].IntegrationId | [0]" \
+            --output text)
+
+          if [ "$INTEGRATION_ID" = "None" ] || [ -z "$INTEGRATION_ID" ]; then
+
+            INTEGRATION_ID=$(aws apigatewayv2 create-integration \
+              --api-id $API_ID \
+              --integration-type AWS_PROXY \
+              --integration-uri $LAMBDA_ARN \
+              --payload-format-version 2.0 \
+              --timeout-in-millis 29000 \
+              --query IntegrationId \
+              --output text)
+
+          fi
+
+          ROUTE_ID=$(aws apigatewayv2 get-routes \
+            --api-id $API_ID \
+            --query "Items[?RouteKey=='POST /ask'].RouteId | [0]" \
+            --output text)
+
+          if [ "$ROUTE_ID" = "None" ] || [ -z "$ROUTE_ID" ]; then
+            aws apigatewayv2 create-route \
+              --api-id $API_ID \
+              --route-key "POST /ask" \
+              --target "integrations/$INTEGRATION_ID"
+          else
+            aws apigatewayv2 update-route \
+              --api-id $API_ID \
+              --route-id $ROUTE_ID \
+              --target "integrations/$INTEGRATION_ID"
+          fi
+
+          aws apigatewayv2 create-stage \
+            --api-id $API_ID \
+            --stage-name '$default' \
+            --auto-deploy 2>/dev/null || true
+
+      - name: Allow API Gateway to Invoke Lambda
+        run: |
+          aws lambda add-permission \
+            --function-name $FUNCTION_NAME \
+            --statement-id apigateway-invoke \
+            --action lambda:InvokeFunction \
+            --principal apigateway.amazonaws.com \
+            --source-arn "arn:aws:execute-api:${{ secrets.AWS_REGION }}:$ACCOUNT_ID:$API_ID/*/POST/ask" \
+            || echo "Permission already exists."
+
+      - name: Display API URL
+        run: |
+          API_URL=$(aws apigatewayv2 get-api \
+            --api-id $API_ID \
+            --query ApiEndpoint \
+            --output text)
+
+          echo "### Deployment Completed" >> $GITHUB_STEP_SUMMARY
+          echo "API URL: ${API_URL}/ask" >> $GITHUB_STEP_SUMMARY
