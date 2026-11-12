@@ -108,6 +108,7 @@ jobs:
 
       # Generate Dockerfile during workflow
       
+      
       - name: Create Lambda Dockerfile
         run: |
           cat > Dockerfile <<'EOF'
@@ -117,76 +118,46 @@ jobs:
 
           RUN python -m pip install --upgrade pip setuptools wheel
 
-          # Install CPU-only PyTorch first
+          # Install compatible NumPy binary wheel
           RUN pip install --no-cache-dir \
+              --only-binary=:all: \
+              --target ${LAMBDA_TASK_ROOT} \
+              "numpy==1.26.4"
+
+          # Install CPU-only PyTorch
+          RUN pip install --no-cache-dir \
+              --only-binary=:all: \
               --target ${LAMBDA_TASK_ROOT} \
               --index-url https://download.pytorch.org/whl/cpu \
               torch
 
-          # Install the existing RAG dependencies
+          # Install remaining RAG dependencies
           RUN pip install --no-cache-dir \
+              --only-binary=:all: \
               --target ${LAMBDA_TASK_ROOT} \
-              --extra-index-url https://download.pytorch.org/whl/cpu \
+              --no-deps \
               sentence-transformers \
               anthropic \
               qdrant-client \
               pypdf
+
+          # Install Sentence Transformers dependencies
+          RUN pip install --no-cache-dir \
+              --only-binary=:all: \
+              --target ${LAMBDA_TASK_ROOT} \
+              "transformers" \
+              "tokenizers" \
+              "huggingface-hub" \
+              "safetensors" \
+              "scikit-learn" \
+              "scipy" \
+              "Pillow"
 
           COPY src/ ${LAMBDA_TASK_ROOT}/src/
           COPY lambda_function.py ${LAMBDA_TASK_ROOT}/
 
           CMD ["lambda_function.lambda_handler"]
           EOF
-
-
-      # Build container image
-      - name: Build Lambda Image
-        run: |
-
-          docker build \
-            --platform linux/amd64 \
-            -t medical-rag-backend:latest .
-
-      # Push image to ECR
-      - name: Push Image to ECR
-        run: |
-
-          docker tag medical-rag-backend:latest \
-            $REPOSITORY_URI:latest
-
-          docker push $REPOSITORY_URI:latest
-
-      # Configure Lambda environment
-      - name: Prepare Environment Variables
-        env:
-          QDRANT_URL: ${{ secrets.QDRANT_URL }}
-          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-          QDRANT_COLLECTION_NAME: ${{ secrets.COLLECTION_NAME }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-
-        run: |
-
-          python - <<'PY'
-          import os
-          import json
-
-          names = [
-              "QDRANT_URL",
-              "QDRANT_API_KEY",
-              "QDRANT_COLLECTION_NAME",
-              "ANTHROPIC_API_KEY"
-          ]
-
-          config = {
-              "Variables": {
-                  name: os.environ[name]
-                  for name in names
-              }
-          }
-
-          with open("lambda-env.json", "w") as f:
-              json.dump(config, f)
-          PY
 
       # Create or update Lambda
       - name: Create or Update Lambda
