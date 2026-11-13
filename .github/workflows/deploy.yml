@@ -52,6 +52,30 @@ jobs:
       - name: SAM Build
         run: sam build --template-file template.yml
 
+      
+      - name: Check Repository Files
+        run: |
+          echo "Current directory:"
+          pwd
+
+          echo "Repository files:"
+          ls -la
+
+          echo "Searching for SAM templates:"
+          find . -maxdepth 3 -type f \( -name "template.yml" -o -name "template.yaml" \)
+
+          if [ ! -f template.yml ]; then
+            echo "ERROR: template.yml missing from repository root"
+            exit 1
+          fi
+
+      - name: Validate SAM Template
+        run: sam validate --lint --template-file ./template.yml
+
+      - name: SAM Build
+        run: sam build --template-file ./template.yml
+
+
       # 6. Automatically recover failed CloudFormation stack
       - name: Check and Recover CloudFormation Stack
         shell: bash
