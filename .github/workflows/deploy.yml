@@ -92,36 +92,33 @@ jobs:
             echo "No existing stack found."
           fi
 
-      # 9. Recover failed CloudFormation stack
+      
+      # 9. Check CloudFormation Stack Status
       - name: Check and Recover CloudFormation Stack
         shell: bash
         run: |
-
           STACK_NAME="medical-rag-stack"
           REGION="ap-southeast-2"
 
-          set +e
+          set -e
+
+          echo "Checking CloudFormation stack..."
 
           STACK_STATUS=$(aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \
             --region "$REGION" \
             --query 'Stacks[0].StackStatus' \
-            --output text 2>/dev/null)
+            --output text 2>/dev/null || echo "NOT_FOUND")
 
-          RESULT=$?
+          echo "Current stack status: $STACK_STATUS"
 
-          set -e
+          case "$STACK_STATUS" in
 
-          if [ "$RESULT" -ne 0 ]; then
+            NOT_FOUND)
+              echo "No existing stack. Fresh deployment can proceed."
+              ;;
 
-            echo "Stack does not exist. Fresh deployment will proceed."
-
-          else
-
-            echo "Current stack status: $STACK_STATUS"
-
-            if [ "$STACK_STATUS" = "ROLLBACK_COMPLETE" ]; then
-
+            ROLLBACK_COMPLETE)
               echo "Deleting failed stack..."
 
               aws cloudformation delete-stack \
@@ -132,28 +129,41 @@ jobs:
                 --stack-name "$STACK_NAME" \
                 --region "$REGION"
 
-              echo "Stack deleted successfully."
+              echo "Failed stack removed."
+              ;;
 
-            elif [ "$STACK_STATUS" = "DELETE_IN_PROGRESS" ]; then
-
-              aws cloudformation wait stack-delete-complete \
-                --stack-name "$STACK_NAME" \
-                --region "$REGION"
-
-            elif [ "$STACK_STATUS" = "CREATE_COMPLETE" ] || \
-                 [ "$STACK_STATUS" = "UPDATE_COMPLETE" ] || \
-                 [ "$STACK_STATUS" = "UPDATE_ROLLBACK_COMPLETE" ]; then
-
+            CREATE_COMPLETE|UPDATE_COMPLETE|UPDATE_ROLLBACK_COMPLETE)
               echo "Stack is ready for deployment."
+              ;;
 
-            else
+            REVIEW_IN_PROGRESS)
+              echo "Stack is in REVIEW_IN_PROGRESS."
+              echo "Checking available CloudFormation changesets..."
 
-              echo "Unexpected stack status: $STACK_STATUS"
+              aws cloudformation list-change-sets \
+                --stack-name "$STACK_NAME" \
+                --region "$REGION" \
+                --output table
+
+              echo "Checking recent stack events..."
+
+              aws cloudformation describe-stack-events \
+                --stack-name "$STACK_NAME" \
+                --region "$REGION" \
+                --max-items 15 \
+                --output table
+
+              echo "Deployment stopped safely. Review the pending changeset before proceeding."
               exit 1
+              ;;
 
-            fi
+            *)
+              echo "Stack is currently in $STACK_STATUS."
+              echo "Waiting or investigating is required."
+              exit 1
+              ;;
+          esac
 
-          fi
 
       # 10. Deploy
       - name: SAM Deploy
