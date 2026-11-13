@@ -3,4 +3,5 @@ anthropic
 qdrant-client
 boto3
 sentence-transformers
-pypdf
+optimum
+onnxruntime

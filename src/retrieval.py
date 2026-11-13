@@ -5,8 +5,6 @@ from qdrant_client import QdrantClient
 from src.embeddings import generate_embeddings
 
 
-# Configuration
-
 COLLECTION_NAME = os.getenv(
     "QDRANT_COLLECTION_NAME",
     "ai_medicine_test"
@@ -23,8 +21,6 @@ if not QDRANT_API_KEY:
     raise ValueError("QDRANT_API_KEY is missing")
 
 
-# Connect to Qdrant Cloud
-
 client = QdrantClient(
     url=QDRANT_URL,
     api_key=QDRANT_API_KEY,
@@ -32,10 +28,10 @@ client = QdrantClient(
 )
 
 
-print("Connected to Qdrant Cloud")
-
-
 def retrieve_documents(query: str, top_k: int = 5):
+    """
+    Retrieve relevant documents from Qdrant.
+    """
 
     if not query or not query.strip():
         raise ValueError("Query cannot be empty")
@@ -43,36 +39,27 @@ def retrieve_documents(query: str, top_k: int = 5):
     if top_k <= 0:
         raise ValueError("top_k must be positive")
 
-    print("\nUser Query:", query)
+    print("Generating query embedding...")
 
-    # Step 1: Generate query embedding
+    query_vector = generate_embeddings([query.strip()])[0]
 
-    print("\nGenerating query embedding...")
+    if len(query_vector) != 384:
+        raise ValueError(
+            f"Expected 384 dimensions, got {len(query_vector)}"
+        )
 
-    query_vector = generate_embeddings([query])[0]
+    print("Searching Qdrant...")
 
-    print(
-        "Query embedding generated.",
-        "Vector dimensions:",
-        len(query_vector)
-    )
-
-    # Step 2: Search Qdrant
-
-    print("\nSearching Qdrant...")
-
-    search_results = client.query_points(
+    results = client.query_points(
         collection_name=COLLECTION_NAME,
         query=query_vector,
         limit=top_k,
         with_payload=True
     ).points
 
-    # Step 3: Extract retrieved information
-
     retrieved_documents = []
 
-    for result in search_results:
+    for result in results:
 
         payload = result.payload or {}
 
@@ -84,8 +71,6 @@ def retrieve_documents(query: str, top_k: int = 5):
             "score": result.score
         })
 
-    print(
-        f"\nRetrieved {len(retrieved_documents)} documents."
-    )
+    print(f"Retrieved {len(retrieved_documents)} documents.")
 
     return retrieved_documents

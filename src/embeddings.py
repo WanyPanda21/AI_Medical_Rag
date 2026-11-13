@@ -3,15 +3,19 @@ from sentence_transformers import SentenceTransformer
 
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
-model = None
+_model = None
 
 
 def get_model():
+    """
+    Load the ONNX embedding model only when required.
+    """
 
-    global model
+    global _model
 
-    if model is None:
-        model = SentenceTransformer(
+    if _model is None:
+
+        _model = SentenceTransformer(
             MODEL_NAME,
             backend="onnx",
             model_kwargs={
@@ -19,21 +23,25 @@ def get_model():
             }
         )
 
-    return model
+    return _model
 
 
 def generate_embeddings(texts: list[str]) -> list[list[float]]:
+    """
+    Generate normalized ONNX embeddings.
+    """
 
     if not texts:
         return []
 
-    embedding_model = get_model()
+    model = get_model()
 
-    embeddings = embedding_model.encode(
+    embeddings = model.encode(
         texts,
         batch_size=32,
         show_progress_bar=False,
-        normalize_embeddings=True
+        normalize_embeddings=True,
+        convert_to_numpy=True
     )
 
     return embeddings.tolist()
