@@ -93,7 +93,8 @@ jobs:
           fi
 
       
-      # 9. Check CloudFormation Stack Status
+      
+      # 9. Recover CloudFormation Stack
       - name: Check and Recover CloudFormation Stack
         shell: bash
         run: |
@@ -102,67 +103,72 @@ jobs:
 
           set -e
 
-          echo "Checking CloudFormation stack..."
-
-          STACK_STATUS=$(aws cloudformation describe-stacks \
+          STATUS=$(aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \
             --region "$REGION" \
             --query 'Stacks[0].StackStatus' \
             --output text 2>/dev/null || echo "NOT_FOUND")
 
-          echo "Current stack status: $STACK_STATUS"
+          echo "Stack status: $STATUS"
 
-          case "$STACK_STATUS" in
+          if [ "$STATUS" = "REVIEW_IN_PROGRESS" ]; then
 
-            NOT_FOUND)
-              echo "No existing stack. Fresh deployment can proceed."
-              ;;
+            echo "Looking for an existing changeset..."
 
-            ROLLBACK_COMPLETE)
-              echo "Deleting failed stack..."
+            CHANGESET=$(aws cloudformation list-change-sets \
+              --stack-name "$STACK_NAME" \
+              --region "$REGION" \
+              --query "Summaries[?Status=='CREATE_COMPLETE'].ChangeSetName | [0]" \
+              --output text)
 
-              aws cloudformation delete-stack \
-                --stack-name "$STACK_NAME" \
-                --region "$REGION"
-
-              aws cloudformation wait stack-delete-complete \
-                --stack-name "$STACK_NAME" \
-                --region "$REGION"
-
-              echo "Failed stack removed."
-              ;;
-
-            CREATE_COMPLETE|UPDATE_COMPLETE|UPDATE_ROLLBACK_COMPLETE)
-              echo "Stack is ready for deployment."
-              ;;
-
-            REVIEW_IN_PROGRESS)
-              echo "Stack is in REVIEW_IN_PROGRESS."
-              echo "Checking available CloudFormation changesets..."
-
-              aws cloudformation list-change-sets \
-                --stack-name "$STACK_NAME" \
-                --region "$REGION" \
-                --output table
-
-              echo "Checking recent stack events..."
-
-              aws cloudformation describe-stack-events \
-                --stack-name "$STACK_NAME" \
-                --region "$REGION" \
-                --max-items 15 \
-                --output table
-
-              echo "Deployment stopped safely. Review the pending changeset before proceeding."
+            if [ -z "$CHANGESET" ] || [ "$CHANGESET" = "None" ]; then
+              echo "No executable changeset found."
+              echo "Stopping safely. Do not delete the stack."
               exit 1
-              ;;
+            fi
 
-            *)
-              echo "Stack is currently in $STACK_STATUS."
-              echo "Waiting or investigating is required."
-              exit 1
-              ;;
-          esac
+            echo "Executing changeset: $CHANGESET"
+
+            aws cloudformation execute-change-set \
+              --stack-name "$STACK_NAME" \
+              --change-set-name "$CHANGESET" \
+              --region "$REGION"
+
+            echo "Waiting for stack creation..."
+
+            aws cloudformation wait stack-create-complete \
+              --stack-name "$STACK_NAME" \
+              --region "$REGION"
+
+          elif [ "$STATUS" = "ROLLBACK_COMPLETE" ]; then
+
+            echo "Removing failed initial stack..."
+
+            aws cloudformation delete-stack \
+              --stack-name "$STACK_NAME" \
+              --region "$REGION"
+
+            aws cloudformation wait stack-delete-complete \
+              --stack-name "$STACK_NAME" \
+              --region "$REGION"
+
+          elif [ "$STATUS" = "CREATE_COMPLETE" ] || \
+               [ "$STATUS" = "UPDATE_COMPLETE" ] || \
+               [ "$STATUS" = "UPDATE_ROLLBACK_COMPLETE" ]; then
+
+            echo "Stack is ready."
+
+          elif [ "$STATUS" = "NOT_FOUND" ]; then
+
+            echo "Fresh deployment can proceed."
+
+          else
+
+            echo "Unexpected stack status: $STATUS"
+            exit 1
+
+          fi
+
 
 
       # 10. Deploy
