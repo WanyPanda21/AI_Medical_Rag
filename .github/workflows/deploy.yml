@@ -2,7 +2,6 @@
 name: Deploy Medical RAG Backend
 
 on:
-
   push:
     branches:
       - main
@@ -10,33 +9,29 @@ on:
       - 'lambda_function.py'
       - 'template.yml'
       - 'requirements.txt'
-      - 'src/**'
+      - 'src/generator.py'
+      - 'src/retrieval.py'
+      - 'src/embeddings.py'
+      - 'src/__init__.py'
       - '.github/workflows/deploy.yml'
 
   workflow_dispatch:
 
-
 jobs:
-
   deploy:
-
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout Repository
         uses: actions/checkout@v4
-
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
 
-
       - name: Setup AWS SAM
         uses: aws-actions/setup-sam@v2
-
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -45,10 +40,8 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-southeast-2
 
-
       - name: SAM Build
         run: sam build
-
 
       - name: SAM Deploy
         run: |

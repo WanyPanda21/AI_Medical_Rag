@@ -1,49 +1,35 @@
 
-# from sentence_transformers import SentenceTransformer
-
-
-# MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-
-# model = SentenceTransformer(MODEL_NAME)
-
-
-# def generate_embeddings(texts: list[str]) -> list[list[float]]:
-#     """
-#     Generate embeddings for a list of text chunks.
-#     """
-
-#     if not texts:
-#         return []
-
-#     embeddings = model.encode(
-#         texts,
-#         batch_size=32,
-#         show_progress_bar=True,
-#         normalize_embeddings=True
-#     )
-
-#     return embeddings.tolist()
-
-
-
 from sentence_transformers import SentenceTransformer
 
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
-model = SentenceTransformer(
-    MODEL_NAME,
-    backend="onnx",
-    model_kwargs={
-        "file_name": "onnx/model_O4.onnx"
-    }
-)
+model = None
+
+
+def get_model():
+
+    global model
+
+    if model is None:
+        model = SentenceTransformer(
+            MODEL_NAME,
+            backend="onnx",
+            model_kwargs={
+                "file_name": "onnx/model_O4.onnx"
+            }
+        )
+
+    return model
+
 
 def generate_embeddings(texts: list[str]) -> list[list[float]]:
 
     if not texts:
         return []
 
-    embeddings = model.encode(
+    embedding_model = get_model()
+
+    embeddings = embedding_model.encode(
         texts,
         batch_size=32,
         show_progress_bar=False,

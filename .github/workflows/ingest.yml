@@ -8,11 +8,13 @@ on:
     branches:
       - main
     paths:
-      - "data/**"
-      - "src/**"
-      - "main.py"
-      - "requirements.txt"
-      - ".github/workflows/ingest.yml"
+      - 'data/**'
+      - 'src/chunking.py'
+      - 'src/embeddings.py'
+      - 'src/qdrant_ingestion.py'
+      - 'main.py'
+      - 'requirements.txt'
+      - '.github/workflows/ingest.yml'
 
 jobs:
   ingestion:
@@ -25,7 +27,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.13'
 
       - name: Install Dependencies
         run: |
@@ -37,6 +39,5 @@ jobs:
           QDRANT_URL: ${{ secrets.QDRANT_URL }}
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
           QDRANT_COLLECTION_NAME: ${{ secrets.COLLECTION_NAME }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          python main.py
+
+        run: python main.py

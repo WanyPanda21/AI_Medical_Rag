@@ -1,8 +1,6 @@
+
 anthropic
 qdrant-client
 boto3
-pypdf
 sentence-transformers
-anthropic
-qdrant-client
-boto3
+pypdf
