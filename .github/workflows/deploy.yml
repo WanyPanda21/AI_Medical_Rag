@@ -30,24 +30,15 @@ jobs:
       # 2. Debug repository structure
       - name: Debug Repository Structure
         run: |
-          echo "Current directory:"
           pwd
-
-          echo "Root directory contents:"
           ls -la
 
-          echo "All YAML files:"
-          find . -type f \( -name "*.yml" -o -name "*.yaml" \)
-
-          echo "Git tracked template files:"
-          git ls-files | grep -i 'template' || true
-
-          if [ -f "./template.yml" ]; then
-            echo "FOUND template.yml"
-          else
+          if [ ! -f "./template.yml" ]; then
             echo "ERROR: template.yml NOT FOUND"
             exit 1
           fi
+
+          echo "template.yml found successfully"
 
       # 3. Python
       - name: Setup Python
@@ -75,7 +66,33 @@ jobs:
       - name: SAM Build
         run: sam build --template-file ./template.yml
 
-      # 8. Recover failed CloudFormation stack
+      # 8. Check existing stack BEFORE recovery
+      - name: Check Previous CloudFormation Failures
+        shell: bash
+        run: |
+
+          STACK_NAME="medical-rag-stack"
+          REGION="ap-southeast-2"
+
+          echo "Checking CloudFormation stack..."
+
+          if aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$REGION" >/dev/null 2>&1; then
+
+            echo "Previous CloudFormation failure events:"
+
+            aws cloudformation describe-stack-events \
+              --stack-name "$STACK_NAME" \
+              --region "$REGION" \
+              --query "StackEvents[?ResourceStatus=='CREATE_FAILED' || ResourceStatus=='UPDATE_FAILED' || ResourceStatus=='UPDATE_ROLLBACK_FAILED'].[Timestamp,LogicalResourceId,ResourceType,ResourceStatus,ResourceStatusReason]" \
+              --output table || true
+
+          else
+            echo "No existing stack found."
+          fi
+
+      # 9. Recover failed CloudFormation stack
       - name: Check and Recover CloudFormation Stack
         shell: bash
         run: |
@@ -138,9 +155,10 @@ jobs:
 
           fi
 
-      # 9. Deploy
+      # 10. Deploy
       - name: SAM Deploy
         run: |
+
           sam deploy \
             --template-file .aws-sam/build/template.yaml \
             --stack-name medical-rag-stack \
@@ -155,3 +173,17 @@ jobs:
               QdrantCollectionName="${{ secrets.COLLECTION_NAME }}" \
               AnthropicApiKey="${{ secrets.ANTHROPIC_API_KEY }}" \
               ClaudeModel="${{ vars.CLAUDE_MODEL }}"
+
+      # 11. Diagnose deployment failure
+      - name: Diagnose Deployment Failure
+        if: failure()
+        shell: bash
+        run: |
+
+          echo "Checking latest CloudFormation deployment errors..."
+
+          aws cloudformation describe-stack-events \
+            --stack-name medical-rag-stack \
+            --region ap-southeast-2 \
+            --query "StackEvents[?ResourceStatus=='CREATE_FAILED' || ResourceStatus=='UPDATE_FAILED' || ResourceStatus=='UPDATE_ROLLBACK_FAILED'].[Timestamp,LogicalResourceId,ResourceType,ResourceStatus,ResourceStatusReason]" \
+            --output table || true
