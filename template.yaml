@@ -2,7 +2,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 
-Description: Medical RAG Application with Qdrant Claude and Doctor HITL
+Description: Medical RAG Application with Qdrant, Claude and Doctor HITL
 
 Parameters:
 
@@ -26,7 +26,6 @@ Parameters:
     Type: String
     Default: claude-haiku-5-5
 
-
 Resources:
 
   # -----------------------------------
@@ -49,9 +48,8 @@ Resources:
         - AttributeName: request_id
           KeyType: HASH
 
-
   # -----------------------------------
-  # API GATEWAY HTTP API
+  # API GATEWAY
   # -----------------------------------
 
   MedicalApi:
@@ -61,7 +59,6 @@ Resources:
       StageName: prod
 
       CorsConfiguration:
-
         AllowOrigins:
           - http://localhost:8501
 
@@ -75,9 +72,8 @@ Resources:
 
         MaxAge: 600
 
-
   # -----------------------------------
-  # LAMBDA FUNCTION
+  # MEDICAL RAG LAMBDA
   # -----------------------------------
 
   MedicalRagLambda:
@@ -98,7 +94,6 @@ Resources:
       MemorySize: 2048
 
       Environment:
-
         Variables:
 
           MEDICAL_REQUESTS_TABLE:
@@ -123,7 +118,6 @@ Resources:
 
         - DynamoDBCrudPolicy:
             TableName: !Ref MedicalRequestsTable
-
 
       Events:
 
@@ -162,11 +156,15 @@ Resources:
             Path: /patient/response/{request_id}
             Method: GET
 
+# -----------------------------------
+# OUTPUTS
+# -----------------------------------
 
 Outputs:
 
   MedicalApiUrl:
     Description: Medical API Gateway URL
+
     Value: !Sub
       - "https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com/prod"
       - ApiId: !Ref MedicalApi

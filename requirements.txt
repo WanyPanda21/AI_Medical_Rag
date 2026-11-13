@@ -1,6 +1,8 @@
-
 anthropic
 qdrant-client
 boto3
-streamlit
-requests
+pypdf
+sentence-transformers
+anthropic
+qdrant-client
+boto3

@@ -1,16 +1,44 @@
 
-from sentence_transformers import SentenceTransformer
+# from sentence_transformers import SentenceTransformer
 
+
+# MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+
+# model = SentenceTransformer(MODEL_NAME)
+
+
+# def generate_embeddings(texts: list[str]) -> list[list[float]]:
+#     """
+#     Generate embeddings for a list of text chunks.
+#     """
+
+#     if not texts:
+#         return []
+
+#     embeddings = model.encode(
+#         texts,
+#         batch_size=32,
+#         show_progress_bar=True,
+#         normalize_embeddings=True
+#     )
+
+#     return embeddings.tolist()
+
+
+
+from sentence_transformers import SentenceTransformer
 
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
-model = SentenceTransformer(MODEL_NAME)
-
+model = SentenceTransformer(
+    MODEL_NAME,
+    backend="onnx",
+    model_kwargs={
+        "file_name": "onnx/model_O4.onnx"
+    }
+)
 
 def generate_embeddings(texts: list[str]) -> list[list[float]]:
-    """
-    Generate embeddings for a list of text chunks.
-    """
 
     if not texts:
         return []
@@ -18,7 +46,7 @@ def generate_embeddings(texts: list[str]) -> list[list[float]]:
     embeddings = model.encode(
         texts,
         batch_size=32,
-        show_progress_bar=True,
+        show_progress_bar=False,
         normalize_embeddings=True
     )
 
