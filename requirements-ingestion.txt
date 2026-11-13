@@ -1,6 +1,7 @@
 
 qdrant-client
-sentence-transformers
+sentence-transformers[onnx]
 pypdf
 optimum
 onnxruntime
+

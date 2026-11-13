@@ -14,7 +14,6 @@ on:
       - 'src/embeddings.py'
       - 'src/__init__.py'
       - '.github/workflows/deploy.yml'
-      
 
   workflow_dispatch:
 
@@ -41,8 +40,18 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ap-southeast-2
 
+      - name: Verify Requirements
+        run: |
+          test -f requirements.txt
+          echo "Generation requirements found"
+
       - name: SAM Build
         run: sam build
+
+      - name: Verify SAM Build
+        run: |
+          echo "SAM build completed"
+          ls -lah .aws-sam/build/
 
       - name: SAM Deploy
         run: |

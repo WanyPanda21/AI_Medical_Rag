@@ -2,6 +2,6 @@
 anthropic
 qdrant-client
 boto3
-sentence-transformers
+sentence-transformers[onnx]
 optimum
 onnxruntime

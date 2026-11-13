@@ -7,9 +7,6 @@ _model = None
 
 
 def get_model():
-    """
-    Load the ONNX embedding model only when required.
-    """
 
     global _model
 
@@ -27,9 +24,6 @@ def get_model():
 
 
 def generate_embeddings(texts: list[str]) -> list[list[float]]:
-    """
-    Generate normalized ONNX embeddings.
-    """
 
     if not texts:
         return []
@@ -40,8 +34,7 @@ def generate_embeddings(texts: list[str]) -> list[list[float]]:
         texts,
         batch_size=32,
         show_progress_bar=False,
-        normalize_embeddings=True,
-        convert_to_numpy=True
+        normalize_embeddings=True
     )
 
     return embeddings.tolist()
