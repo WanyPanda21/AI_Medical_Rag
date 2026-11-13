@@ -26,26 +26,12 @@ Parameters:
     Type: String
     Default: claude-haiku-5-5
 
+  # Use existing DynamoDB table
+  MedicalRequestsTableName:
+    Type: String
+    Default: MedicalRequests
+
 Resources:
-
-  # DynamoDB Table
-  MedicalRequestsTable:
-    Type: AWS::DynamoDB::Table
-
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-
-    Properties:
-      TableName: MedicalRequests
-      BillingMode: PAY_PER_REQUEST
-
-      AttributeDefinitions:
-        - AttributeName: request_id
-          AttributeType: S
-
-      KeySchema:
-        - AttributeName: request_id
-          KeyType: HASH
 
   # API Gateway
   MedicalApi:
@@ -73,6 +59,7 @@ Resources:
     Type: AWS::Serverless::Function
 
     Properties:
+
       FunctionName: medical_rag_backend
 
       CodeUri: .
@@ -88,8 +75,9 @@ Resources:
       Environment:
         Variables:
 
+          # Reference existing DynamoDB table
           MEDICAL_REQUESTS_TABLE:
-            Ref: MedicalRequestsTable
+            Ref: MedicalRequestsTableName
 
           QDRANT_URL:
             Ref: QdrantUrl
@@ -107,9 +95,10 @@ Resources:
             Ref: ClaudeModel
 
       Policies:
+
         - DynamoDBCrudPolicy:
             TableName:
-              Ref: MedicalRequestsTable
+              Ref: MedicalRequestsTableName
 
       Events:
 
@@ -170,6 +159,6 @@ Outputs:
       Ref: MedicalRagLambda
 
   MedicalDynamoDBTable:
-    Description: Medical DynamoDB Table
+    Description: Existing DynamoDB Table
     Value:
-      Ref: MedicalRequestsTable
+      Ref: MedicalRequestsTableName
