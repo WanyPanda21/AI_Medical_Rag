@@ -46,8 +46,11 @@ jobs:
           aws-region: ap-southeast-2
 
       # 5. Build Lambda
+      - name: Validate SAM Template
+        run: sam validate --lint --template-file template.yml
+
       - name: SAM Build
-        run: sam build
+        run: sam build --template-file template.yml
 
       # 6. Automatically recover failed CloudFormation stack
       - name: Check and Recover CloudFormation Stack

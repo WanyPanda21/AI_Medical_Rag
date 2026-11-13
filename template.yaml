@@ -28,32 +28,26 @@ Parameters:
 
 Resources:
 
-  # -----------------------------------
-  # DYNAMODB TABLE
-  # -----------------------------------
-
+  # DynamoDB Table
   MedicalRequestsTable:
-  Type: AWS::DynamoDB::Table
+    Type: AWS::DynamoDB::Table
 
-  DeletionPolicy: Retain
-  UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
 
-  Properties:
-    TableName: MedicalRequests
-    BillingMode: PAY_PER_REQUEST
+    Properties:
+      TableName: MedicalRequests
+      BillingMode: PAY_PER_REQUEST
 
-    AttributeDefinitions:
-      - AttributeName: request_id
-        AttributeType: S
+      AttributeDefinitions:
+        - AttributeName: request_id
+          AttributeType: S
 
-    KeySchema:
-      - AttributeName: request_id
-        KeyType: HASH
+      KeySchema:
+        - AttributeName: request_id
+          KeyType: HASH
 
-  # -----------------------------------
-  # API GATEWAY
-  # -----------------------------------
-
+  # API Gateway
   MedicalApi:
     Type: AWS::Serverless::HttpApi
 
@@ -74,15 +68,11 @@ Resources:
 
         MaxAge: 600
 
-  # -----------------------------------
-  # MEDICAL RAG LAMBDA
-  # -----------------------------------
-
+  # Medical RAG Lambda
   MedicalRagLambda:
     Type: AWS::Serverless::Function
 
     Properties:
-
       FunctionName: medical_rag_backend
 
       CodeUri: .
@@ -99,82 +89,87 @@ Resources:
         Variables:
 
           MEDICAL_REQUESTS_TABLE:
-            !Ref MedicalRequestsTable
+            Ref: MedicalRequestsTable
 
           QDRANT_URL:
-            !Ref QdrantUrl
+            Ref: QdrantUrl
 
           QDRANT_API_KEY:
-            !Ref QdrantApiKey
+            Ref: QdrantApiKey
 
           QDRANT_COLLECTION_NAME:
-            !Ref QdrantCollectionName
+            Ref: QdrantCollectionName
 
           ANTHROPIC_API_KEY:
-            !Ref AnthropicApiKey
+            Ref: AnthropicApiKey
 
           CLAUDE_MODEL:
-            !Ref ClaudeModel
+            Ref: ClaudeModel
 
       Policies:
-
         - DynamoDBCrudPolicy:
-            TableName: !Ref MedicalRequestsTable
+            TableName:
+              Ref: MedicalRequestsTable
 
       Events:
 
         PatientQuery:
           Type: HttpApi
           Properties:
-            ApiId: !Ref MedicalApi
+            ApiId:
+              Ref: MedicalApi
             Path: /patient/query
             Method: POST
 
         PatientStatus:
           Type: HttpApi
           Properties:
-            ApiId: !Ref MedicalApi
+            ApiId:
+              Ref: MedicalApi
             Path: /patient/status/{request_id}
             Method: GET
 
         DoctorPending:
           Type: HttpApi
           Properties:
-            ApiId: !Ref MedicalApi
+            ApiId:
+              Ref: MedicalApi
             Path: /doctor/pending
             Method: GET
 
         DoctorReview:
           Type: HttpApi
           Properties:
-            ApiId: !Ref MedicalApi
+            ApiId:
+              Ref: MedicalApi
             Path: /doctor/review/{request_id}
             Method: POST
 
         PatientResponse:
           Type: HttpApi
           Properties:
-            ApiId: !Ref MedicalApi
+            ApiId:
+              Ref: MedicalApi
             Path: /patient/response/{request_id}
             Method: GET
-
-# -----------------------------------
-# OUTPUTS
-# -----------------------------------
 
 Outputs:
 
   MedicalApiUrl:
     Description: Medical API Gateway URL
 
-    Value: !Sub
-      - "https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com/prod"
-      - ApiId: !Ref MedicalApi
+    Value:
+      Fn::Sub:
+        - https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com/prod
+        - ApiId:
+            Ref: MedicalApi
 
   MedicalLambdaFunction:
     Description: Medical Lambda Function
-    Value: !Ref MedicalRagLambda
+    Value:
+      Ref: MedicalRagLambda
 
   MedicalDynamoDBTable:
-    Description: Medical Requests DynamoDB Table
-    Value: !Ref MedicalRequestsTable
+    Description: Medical DynamoDB Table
+    Value:
+      Ref: MedicalRequestsTable
