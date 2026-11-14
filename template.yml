@@ -1,135 +1,144 @@
-AWSTemplateFormatVersion: "2010-09-09"
+
+AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: PharmaCare AI Medical RAG backend - Lambda, HTTP API Gateway, and DynamoDB
+Description: PharmaCare AI - RAG and Doctor Review Backend
 
 Parameters:
+
   AnthropicApiKey:
     Type: String
     NoEcho: true
-    Description: Anthropic API key used by Claude
 
   QdrantApiKey:
     Type: String
     NoEcho: true
-    Description: Qdrant Cloud API key
 
   QdrantUrl:
     Type: String
-    Description: Qdrant Cloud cluster URL
 
-  QdrantCollectionName:
+  QdrantCollection:
     Type: String
-    Default: ai_medicine_test
-    Description: Must match the collection populated by ingest_documents.yml
+    Default: medical_knowledge
 
   ClaudeModel:
     Type: String
-    Default: claude-sonnet-4-6
+    Default: claude-haiku-5-5
 
-  MedicalRequestsTableName:
+  ClinicalCasesTableName:
     Type: String
-    Default: pharmacare-medical-requests-dev
+    Default: pharmacare-ai-clinical-cases
 
 Globals:
   Function:
     Runtime: python3.12
     Architectures:
       - x86_64
-    Timeout: 60
+    Timeout: 28
     MemorySize: 1024
     Environment:
       Variables:
         ANTHROPIC_API_KEY: !Ref AnthropicApiKey
         CLAUDE_MODEL: !Ref ClaudeModel
-        QDRANT_API_KEY: !Ref QdrantApiKey
         QDRANT_URL: !Ref QdrantUrl
-        QDRANT_COLLECTION_NAME: !Ref QdrantCollectionName
-        MEDICAL_REQUESTS_TABLE: !Ref MedicalRequestsTable
+        QDRANT_API_KEY: !Ref QdrantApiKey
+        QDRANT_COLLECTION: !Ref QdrantCollection
+        MEDICAL_CASES_TABLE: !Ref ClinicalCasesTable
 
 Resources:
-  MedicalRequestsTable:
+
+  # -----------------------------
+  # API Gateway
+  # -----------------------------
+
+  PharmaCareApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: PharmaCareAI-API
+      StageName: Prod
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: "'*'"
+
+  # -----------------------------
+  # DynamoDB Table
+  # -----------------------------
+
+  ClinicalCasesTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Ref MedicalRequestsTableName
+      TableName: !Ref ClinicalCasesTableName
       BillingMode: PAY_PER_REQUEST
+
       AttributeDefinitions:
-        - AttributeName: request_id
+        - AttributeName: case_id
           AttributeType: S
+
       KeySchema:
-        - AttributeName: request_id
+        - AttributeName: case_id
           KeyType: HASH
 
-  MedicalRagApi:
-    Type: AWS::Serverless::HttpApi
-    Properties:
-      StageName: $default
-      CorsConfiguration:
-        AllowOrigins:
-          - http://localhost:8501
-        AllowHeaders:
-          - Content-Type
-        AllowMethods:
-          - GET
-          - POST
-          - OPTIONS
-        MaxAge: 600
+      SSESpecification:
+        SSEEnabled: true
 
-  MedicalRagFunction:
+  # -----------------------------
+  # Main Lambda Function
+  # -----------------------------
+
+  PharmaCareLambda:
     Type: AWS::Serverless::Function
+
     Properties:
-      FunctionName: !Sub "${AWS::StackName}-medical-rag-api"
+      FunctionName: PharmaCareAI-Backend
       CodeUri: lambda_package/
-      Handler: lambda_function.lambda_handler
+      Handler: backend.clinical_review.handler.handler
+
       Policies:
-        - AWSLambdaBasicExecutionRole
         - DynamoDBCrudPolicy:
-            TableName: !Ref MedicalRequestsTable
+            TableName: !Ref ClinicalCasesTable
+
       Events:
-        PatientQuery:
-          Type: HttpApi
+
+        CreateCase:
+          Type: Api
           Properties:
-            ApiId: !Ref MedicalRagApi
-            Path: /patient/query
+            RestApiId: !Ref PharmaCareApi
+            Path: /cases
             Method: POST
-            PayloadFormatVersion: "2.0"
-        PatientStatus:
-          Type: HttpApi
+
+        GetCase:
+          Type: Api
           Properties:
-            ApiId: !Ref MedicalRagApi
-            Path: /patient/status/{request_id}
+            RestApiId: !Ref PharmaCareApi
+            Path: /cases/{case_id}
             Method: GET
-            PayloadFormatVersion: "2.0"
-        DoctorPending:
-          Type: HttpApi
+
+        DoctorPendingCases:
+          Type: Api
           Properties:
-            ApiId: !Ref MedicalRagApi
-            Path: /doctor/pending
+            RestApiId: !Ref PharmaCareApi
+            Path: /doctor/cases
             Method: GET
-            PayloadFormatVersion: "2.0"
-        DoctorReview:
-          Type: HttpApi
+
+        DoctorReviewCase:
+          Type: Api
           Properties:
-            ApiId: !Ref MedicalRagApi
-            Path: /doctor/review/{request_id}
+            RestApiId: !Ref PharmaCareApi
+            Path: /doctor/cases/{case_id}
             Method: POST
-            PayloadFormatVersion: "2.0"
-        PatientResponse:
-          Type: HttpApi
-          Properties:
-            ApiId: !Ref MedicalRagApi
-            Path: /patient/response/{request_id}
-            Method: GET
-            PayloadFormatVersion: "2.0"
 
 Outputs:
-  MedicalRagApiUrl:
-    Description: API Gateway base URL for Streamlit MEDICAL_API_URL
-    Value: !Sub "https://${MedicalRagApi}.execute-api.${AWS::Region}.amazonaws.com"
 
-  MedicalRagFunctionName:
-    Description: Deployed Lambda function name
-    Value: !Ref MedicalRagFunction
+  PharmaCareApiUrl:
+    Description: PharmaCare API Gateway URL
+    Value: !Sub
+      - "https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+      - ApiId: !Ref PharmaCareApi
 
-  MedicalRequestsTableName:
-    Description: DynamoDB table used for patient requests and doctor review
-    Value: !Ref MedicalRequestsTable
+  PharmaCareLambdaArn:
+    Description: PharmaCare Lambda ARN
+    Value: !GetAtt PharmaCareLambda.Arn
+
+  ClinicalCasesTable:
+    Description: DynamoDB Table Name
+    Value: !Ref ClinicalCasesTable

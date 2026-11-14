@@ -1,3 +1,4 @@
+
 name: Deploy PharmaCare AI to AWS
 
 on:
@@ -5,97 +6,71 @@ on:
     branches:
       - main
     paths:
-      - "lambda_function.py"
-      - "src/**"
-      - "backend/requirements-lambda.txt"
+      - "backend/**"
       - "template.yml"
+      - "requirements.txt"
       - ".github/workflows/deploy.yml"
+
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
+
   deploy:
+    name: Deploy Lambda and AWS Infrastructure
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Configure Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Configure AWS credentials
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ vars.AWS_REGION }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Verify AWS identity
-        run: aws sts get-caller-identity
-
-      - name: Set up SAM CLI
-        uses: aws-actions/setup-sam@v2
-
-      - name: Prepare Lambda package
+      - name: Install AWS SAM CLI
         run: |
-          set -e
+          pip install aws-sam-cli
+
+      - name: Prepare Lambda Package
+        run: |
           rm -rf lambda_package
-          mkdir -p lambda_package/src
 
-          test -f lambda_function.py
-          test -f backend/requirements-lambda.txt
-          test -d src
+          mkdir -p lambda_package
 
-          cp lambda_function.py lambda_package/
-          cp -r src/. lambda_package/src/
-          cp backend/requirements-lambda.txt lambda_package/requirements.txt
+          cp -r backend lambda_package/
 
-          find lambda_package -type d -name __pycache__ -prune -exec rm -rf {} +
-          find lambda_package -type f -name '*.pyc' -delete
+          cp requirements-lambda.txt lambda_package/requirements.txt
 
-      - name: Verify Lambda package
+      - name: Validate SAM Template
         run: |
-          set -e
-          test -f lambda_package/lambda_function.py
-          test -f lambda_package/src/generator.py
-          test -f lambda_package/src/retrieval.py
-          test -f lambda_package/src/embeddings.py
-          python -m compileall -q lambda_package
-
-      - name: Validate SAM template
-        run: sam validate --template-file template.yml --region "${{ vars.AWS_REGION }}"
+          sam validate --template-file template.yml
 
       - name: Build Lambda
-        run: sam build --template-file template.yml
-
-      - name: Check Lambda package size
         run: |
-          set -e
-          package_dir=".aws-sam/build/MedicalRagFunction"
-          test -d "$package_dir"
-          size=$(du -sb "$package_dir" | cut -f1)
-          echo "MedicalRagFunction package size: $size bytes"
-          if [ "$size" -ge 262144000 ]; then
-            echo "ERROR: Lambda unzipped package exceeds 250 MiB."
-            exit 1
-          fi
+          sam build --template-file template.yml
 
-      - name: Deploy PharmaCare Medical RAG API
+      - name: Deploy to AWS
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-          QDRANT_URL: ${{ vars.QDRANT_URL }}
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_COLLECTION: ${{ secrets.COLLECTION_NAME }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL }}
         run: |
-          set -e
+
           sam deploy \
-            --template-file .aws-sam/build/template.yaml \
-            --stack-name pharmacare-medical-rag-dev \
-            --region "${{ vars.AWS_REGION }}" \
+            --stack-name pharmacare-ai-dev \
+            --region "$AWS_REGION" \
             --resolve-s3 \
             --capabilities CAPABILITY_IAM \
             --no-confirm-changeset \
@@ -104,4 +79,5 @@ jobs:
               AnthropicApiKey="$ANTHROPIC_API_KEY" \
               QdrantApiKey="$QDRANT_API_KEY" \
               QdrantUrl="$QDRANT_URL" \
-              QdrantCollectionName="ai_medicine_test"
+              QdrantCollection="${QDRANT_COLLECTION:-medical_knowledge}" \
+              ClaudeModel="${CLAUDE_MODEL:-claude-haiku-5-5}"

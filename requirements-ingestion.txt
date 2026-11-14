@@ -1,7 +1,0 @@
-
-qdrant-client
-sentence-transformers[onnx]
-pypdf
-optimum
-onnxruntime
-
