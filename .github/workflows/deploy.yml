@@ -48,7 +48,7 @@ jobs:
 
           cp -r backend lambda_package/
 
-          cp requirements-lambda.txt lambda_package/requirements.txt
+          cp requirements.txt lambda_package/requirements.txt
 
       - name: Validate SAM Template
         run: |
