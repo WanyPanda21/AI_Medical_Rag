@@ -1,205 +1,107 @@
-
-name: Deploy Medical RAG Backend
+name: Deploy PharmaCare AI to AWS
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'lambda_function.py'
-      - 'template.yml'
-      - 'requirements.txt'
-      - 'src/generator.py'
-      - 'src/retrieval.py'
-      - 'src/embeddings.py'
-      - 'src/__init__.py'
-      - '.github/workflows/deploy.yml'
-
+      - "lambda_function.py"
+      - "src/**"
+      - "backend/requirements-lambda.txt"
+      - "template.yml"
+      - ".github/workflows/deploy.yml"
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-
-      # 1. Checkout
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Debug repository structure
-      - name: Debug Repository Structure
-        run: |
-          pwd
-          ls -la
-
-          if [ ! -f "./template.yml" ]; then
-            echo "ERROR: template.yml NOT FOUND"
-            exit 1
-          fi
-
-          echo "template.yml found successfully"
-
-      # 3. Python
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: "3.12"
 
-      # 4. AWS SAM
-      - name: Setup AWS SAM
-        uses: aws-actions/setup-sam@v2
-
-      # 5. AWS Credentials
-      - name: Configure AWS Credentials
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ap-southeast-2
+          aws-region: ${{ vars.AWS_REGION }}
 
-      # 6. Validate template
-      - name: Validate SAM Template
-        run: sam validate --lint --template-file ./template.yml
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
 
-      # 7. Build Lambda
-      - name: SAM Build
-        run: sam build --template-file ./template.yml
+      - name: Set up SAM CLI
+        uses: aws-actions/setup-sam@v2
 
-      # 8. Check existing stack BEFORE recovery
-      - name: Check Previous CloudFormation Failures
-        shell: bash
+      - name: Prepare Lambda package
         run: |
-
-          STACK_NAME="medical-rag-stack"
-          REGION="ap-southeast-2"
-
-          echo "Checking CloudFormation stack..."
-
-          if aws cloudformation describe-stacks \
-            --stack-name "$STACK_NAME" \
-            --region "$REGION" >/dev/null 2>&1; then
-
-            echo "Previous CloudFormation failure events:"
-
-            aws cloudformation describe-stack-events \
-              --stack-name "$STACK_NAME" \
-              --region "$REGION" \
-              --query "StackEvents[?ResourceStatus=='CREATE_FAILED' || ResourceStatus=='UPDATE_FAILED' || ResourceStatus=='UPDATE_ROLLBACK_FAILED'].[Timestamp,LogicalResourceId,ResourceType,ResourceStatus,ResourceStatusReason]" \
-              --output table || true
-
-          else
-            echo "No existing stack found."
-          fi
-
-      
-      
-      # 9. Recover CloudFormation Stack
-      - name: Check and Recover CloudFormation Stack
-        shell: bash
-        run: |
-          STACK_NAME="medical-rag-stack"
-          REGION="ap-southeast-2"
-
           set -e
+          rm -rf lambda_package
+          mkdir -p lambda_package/src
 
-          STATUS=$(aws cloudformation describe-stacks \
-            --stack-name "$STACK_NAME" \
-            --region "$REGION" \
-            --query 'Stacks[0].StackStatus' \
-            --output text 2>/dev/null || echo "NOT_FOUND")
+          test -f lambda_function.py
+          test -f backend/requirements-lambda.txt
+          test -d src
 
-          echo "Stack status: $STATUS"
+          cp lambda_function.py lambda_package/
+          cp -r src/. lambda_package/src/
+          cp backend/requirements-lambda.txt lambda_package/requirements.txt
 
-          if [ "$STATUS" = "REVIEW_IN_PROGRESS" ]; then
+          find lambda_package -type d -name __pycache__ -prune -exec rm -rf {} +
+          find lambda_package -type f -name '*.pyc' -delete
 
-            echo "Looking for an existing changeset..."
+      - name: Verify Lambda package
+        run: |
+          set -e
+          test -f lambda_package/lambda_function.py
+          test -f lambda_package/src/generator.py
+          test -f lambda_package/src/retrieval.py
+          test -f lambda_package/src/embeddings.py
+          python -m compileall -q lambda_package
 
-            CHANGESET=$(aws cloudformation list-change-sets \
-              --stack-name "$STACK_NAME" \
-              --region "$REGION" \
-              --query "Summaries[?Status=='CREATE_COMPLETE'].ChangeSetName | [0]" \
-              --output text)
+      - name: Validate SAM template
+        run: sam validate --template-file template.yml --region "${{ vars.AWS_REGION }}"
 
-            if [ -z "$CHANGESET" ] || [ "$CHANGESET" = "None" ]; then
-              echo "No executable changeset found."
-              echo "Stopping safely. Do not delete the stack."
-              exit 1
-            fi
+      - name: Build Lambda
+        run: sam build --template-file template.yml
 
-            echo "Executing changeset: $CHANGESET"
-
-            aws cloudformation execute-change-set \
-              --stack-name "$STACK_NAME" \
-              --change-set-name "$CHANGESET" \
-              --region "$REGION"
-
-            echo "Waiting for stack creation..."
-
-            aws cloudformation wait stack-create-complete \
-              --stack-name "$STACK_NAME" \
-              --region "$REGION"
-
-          elif [ "$STATUS" = "ROLLBACK_COMPLETE" ]; then
-
-            echo "Removing failed initial stack..."
-
-            aws cloudformation delete-stack \
-              --stack-name "$STACK_NAME" \
-              --region "$REGION"
-
-            aws cloudformation wait stack-delete-complete \
-              --stack-name "$STACK_NAME" \
-              --region "$REGION"
-
-          elif [ "$STATUS" = "CREATE_COMPLETE" ] || \
-               [ "$STATUS" = "UPDATE_COMPLETE" ] || \
-               [ "$STATUS" = "UPDATE_ROLLBACK_COMPLETE" ]; then
-
-            echo "Stack is ready."
-
-          elif [ "$STATUS" = "NOT_FOUND" ]; then
-
-            echo "Fresh deployment can proceed."
-
-          else
-
-            echo "Unexpected stack status: $STATUS"
+      - name: Check Lambda package size
+        run: |
+          set -e
+          package_dir=".aws-sam/build/MedicalRagFunction"
+          test -d "$package_dir"
+          size=$(du -sb "$package_dir" | cut -f1)
+          echo "MedicalRagFunction package size: $size bytes"
+          if [ "$size" -ge 262144000 ]; then
+            echo "ERROR: Lambda unzipped package exceeds 250 MiB."
             exit 1
-
           fi
 
-
-
-      # 10. Deploy
-      - name: SAM Deploy
+      - name: Deploy PharmaCare Medical RAG API
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          QDRANT_URL: ${{ vars.QDRANT_URL }}
         run: |
-
+          set -e
           sam deploy \
             --template-file .aws-sam/build/template.yaml \
-            --stack-name medical-rag-stack \
-            --region ap-southeast-2 \
-            --capabilities CAPABILITY_IAM \
+            --stack-name pharmacare-medical-rag-dev \
+            --region "${{ vars.AWS_REGION }}" \
             --resolve-s3 \
+            --capabilities CAPABILITY_IAM \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
-              QdrantUrl="${{ secrets.QDRANT_URL }}" \
-              QdrantApiKey="${{ secrets.QDRANT_API_KEY }}" \
-              QdrantCollectionName="${{ secrets.COLLECTION_NAME }}" \
-              AnthropicApiKey="${{ secrets.ANTHROPIC_API_KEY }}" \
-              ClaudeModel="${{ vars.CLAUDE_MODEL }}"
-
-      # 11. Diagnose deployment failure
-      - name: Diagnose Deployment Failure
-        if: failure()
-        shell: bash
-        run: |
-
-          echo "Checking latest CloudFormation deployment errors..."
-
-          aws cloudformation describe-stack-events \
-            --stack-name medical-rag-stack \
-            --region ap-southeast-2 \
-            --query "StackEvents[?ResourceStatus=='CREATE_FAILED' || ResourceStatus=='UPDATE_FAILED' || ResourceStatus=='UPDATE_ROLLBACK_FAILED'].[Timestamp,LogicalResourceId,ResourceType,ResourceStatus,ResourceStatusReason]" \
-            --output table || true
+              AnthropicApiKey="$ANTHROPIC_API_KEY" \
+              QdrantApiKey="$QDRANT_API_KEY" \
+              QdrantUrl="$QDRANT_URL" \
+              QdrantCollectionName="ai_medicine_test"
