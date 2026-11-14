@@ -6,6 +6,6 @@ sentence-transformers
 optimum
 pypdf
 langchain-huggingface
-
+langchain-text-splitters
 
 
