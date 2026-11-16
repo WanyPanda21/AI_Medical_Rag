@@ -8,7 +8,7 @@ import requests
 # -----------------------------------
 
 API_BASE_URL = (
-    "https://w3h7uyarm0.execute-api.ap-southeast-2.amazonaws.com/Prod"
+    "https://uoeiu0x0ue.execute-api.ap-southeast-2.amazonaws.com/Prod"
 )
 
 st.set_page_config(
