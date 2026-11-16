@@ -192,7 +192,7 @@ def generate_medical_answer(question, documents):
         )
 
         # Extract only text blocks from Claude response.
-        # Ignore ThinkingBlock and other non-text blocks.
+        # Ignore ThinkingBlock and other non-text blocks..
 
         answer_parts = []
 
