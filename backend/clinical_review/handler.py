@@ -184,7 +184,19 @@ def generate_answer(question, documents):
         ]
     )
 
-    return result.content[0].text
+    answer_parts = [
+        block.text
+        for block in result.content
+        if getattr(block, "type", None) == "text"
+        and getattr(block, "text", None)
+    ]
+
+    answer = "\n".join(answer_parts).strip()
+
+    if not answer:
+        raise RuntimeError("Claude response did not contain usable text.")
+
+    return answer
 
 # --------------------------------
 # Create Patient Case
