@@ -5,10 +5,10 @@ import logging
 from anthropic import Anthropic, APIError
 from opentelemetry import trace
 
-from backend.observability.llm_metrics import (record_claude_usage,
-                timed_claude_call,)
-
-
+from backend.observability.llm_metrics import (
+    record_claude_usage,
+    timed_claude_call,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,13 +109,13 @@ def generate_medical_answer(question, documents):
 
         context_parts.append(
             f"""
-        Context {index}
-        Source: {source}
-        Page: {page}
+            Context {index}
+            Source: {source}
+            Page: {page}
 
-        Document content:
-        {document.page_content}
-        """
+            Document content:
+            {document.page_content}
+            """
         )
 
         source_key = (source, page)
@@ -130,27 +130,27 @@ def generate_medical_answer(question, documents):
     context = "\n\n".join(context_parts)
 
     user_prompt = f"""
-            MEDICAL KNOWLEDGE BASE CONTEXT:
+    MEDICAL KNOWLEDGE BASE CONTEXT:
 
-            {context}
+    {context}
 
-            USER QUESTION:
+    USER QUESTION:
 
-            {question}
+    {question}
 
-            INSTRUCTIONS:
+    INSTRUCTIONS:
 
-            Answer the user's question using the supplied context.
+    Answer the user's question using the supplied context.
 
-            Use the requested response structure where relevant.
+    Use the requested response structure where relevant.
 
-            If the documents do not contain enough information,
-            explicitly communicate that limitation.
+    If the documents do not contain enough information,
+    explicitly communicate that limitation.
 
-            Do not invent missing medical information.
+    Do not invent missing medical information.
 
-            Include relevant source document names and page numbers.
-            """
+    Include relevant source document names and page numbers.
+    """
 
     try:
 
@@ -160,7 +160,8 @@ def generate_medical_answer(question, documents):
             timeout=30.0
         )
 
-        response, elapsed = timed_claude_call(client.messages.create,
+        response, elapsed = timed_claude_call(
+            client.messages.create,
             model=MODEL_NAME,
             max_tokens=MAX_TOKENS,
             system=SYSTEM_PROMPT,
@@ -171,12 +172,14 @@ def generate_medical_answer(question, documents):
                 }
             ]
         )
+
         record_claude_usage(
             span=trace.get_current_span(),
             response=response,
             operation="answer_generation",
             elapsed_seconds=elapsed,
         )
+
         logger.info(
             "Claude response metadata: "
             "model=%s, stop_reason=%s, "
@@ -187,12 +190,22 @@ def generate_medical_answer(question, documents):
             response.usage.input_tokens,
             response.usage.output_tokens
         )
-        answer = "\n".join(
-            block.text
-            for block in response.content
-            if block.type == "text"
-            and getattr(block, "text", None)
-        ).strip()
+
+        # Extract only text blocks from Claude response.
+        # Ignore ThinkingBlock and other non-text blocks.
+
+        answer_parts = []
+
+        for block in response.content:
+
+            if getattr(block, "type", None) == "text":
+
+                text_content = getattr(block, "text", None)
+
+                if text_content:
+                    answer_parts.append(text_content)
+
+        answer = "\n".join(answer_parts).strip()
 
         if not answer:
             logger.error(
@@ -201,6 +214,7 @@ def generate_medical_answer(question, documents):
                 response.stop_reason,
                 [block.type for block in response.content]
             )
+
             raise RuntimeError(
                 "Claude response did not contain usable text."
             )
