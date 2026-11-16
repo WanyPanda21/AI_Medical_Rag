@@ -1,0 +1,11 @@
+
+anthropic
+qdrant-client
+boto3
+sentence-transformers
+optimum
+pypdf
+langchain-huggingface
+langchain-text-splitters
+
+

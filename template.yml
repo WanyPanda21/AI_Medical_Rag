@@ -90,8 +90,11 @@ Resources:
 
     Properties:
       FunctionName: PharmaCareAI-Backend
-      CodeUri: lambda_package/
-      Handler: backend.clinical_review.handler.handler
+      CodeUri: backend/
+      Handler: clinical_review.handler.handler
+      Runtime: python3.12
+      Timeout: 30
+      MemorySize: 512
 
       Policies:
         - DynamoDBCrudPolicy:
